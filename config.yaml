@@ -1,0 +1,94 @@
+# =============================================================================
+# 房产带看视频 · 自动变速剪辑配置
+# 原则：不删除任何片段；房间实景原速；转角/空墙/过渡加速
+# 用法：python edit_speed.py 2.mp4
+#       python edit_speed.py 2.mp4 -c config.yaml -o out.mp4
+# =============================================================================
+
+# --- 输入输出 -----------------------------------------------------------------
+io:
+  # 未指定 -o 时的输出命名：{stem}_edited.mp4
+  output_suffix: "_edited"
+  # 中间产物目录：frames/<视频名>/
+  work_dir: "frames"
+  # 是否写出 motion.csv / segments.json / filter_complex.txt
+  save_motion_csv: true
+  save_segments_json: true
+  save_filter_script: true
+
+# --- 运动 / 结构分析 -----------------------------------------------------------
+analysis:
+  # 分析前缩放到该宽度（高度按比例），越小越快
+  resize_width: 135
+  resize_height: 240
+  # Canny 边缘检测阈值（结构密度）
+  canny_low: 50
+  canny_high: 150
+  # 指标时间平滑窗口（帧数，建议奇数）。越大越稳，但短转角更易被抹平
+  smooth_window: 7
+
+# --- 分类阈值（决定 room / move / fast）---------------------------------------
+# 先算 wall / very_fast / transitional，再按优先级贴标签：
+#   wall 或 very_fast → fast
+#   transitional      → move
+#   其余              → room
+classify:
+  # 白墙 / 门板 / 过曝空镜：边缘少 + 对比度低
+  wall_edge_max: 0.035
+  wall_std_max: 45.0
+
+  # 急转 / 快速穿行：平滑后的帧差均值
+  very_fast_motion: 14.0
+
+  # 过渡行走：运动偏大且结构偏弱（房间内缓推通常 edge 较高，不会进这里）
+  transitional_motion: 10.5
+  transitional_edge_max: 0.055
+
+# --- 各类速度倍率（>1 为加速；1 为原速）---------------------------------------
+# 注意：不会丢弃任何时间段，只改变播放速度
+speeds:
+  room: 1.0    # 客厅 / 房间等有意义画面
+  move: 2.2    # 走廊过渡行走
+  fast: 3.5    # 转角 / 空墙 / 急转
+
+# --- 分段后处理 ---------------------------------------------------------------
+segments:
+  # 短于该秒数的「孤岛」并入相邻段，减少闪切
+  min_duration: 0.40
+
+# --- 方案 A：实景停留衰减（room hold ramp）-------------------------------------
+# 连续 room 段内按「已停留时长」分段提速，压缩同一空间过久停留，仍不删帧。
+# after = 相对该 room 段起点的秒数；speed = 该区间播放倍率。
+pacing:
+  enabled: true
+  room_hold_ramp:
+    - after: 0.0
+      speed: 1.0    # 前几秒建立空间感
+    - after: 4.0
+      speed: 1.5    # 开始轻压拖沓
+    - after: 7.0
+      speed: 2.0
+    - after: 10.0
+      speed: 2.8    # 长时间重复信息强压
+
+# --- 人工覆盖（可选）-----------------------------------------------------------
+# 在自动分段之后，按时间强制指定 kind（room|move|fast）。
+# 重叠时后写覆盖先写。适合「某几秒必须原速/必须加速」。
+# overrides:
+#   - start: 10.0
+#     end: 12.5
+#     kind: room
+#   - start: 20.0
+#     end: 22.0
+#     kind: fast
+overrides: []
+
+# --- 编码导出 -----------------------------------------------------------------
+encode:
+  video_codec: "libx264"
+  preset: "medium"       # ultrafast … veryslow
+  crf: 20                # 越小画质越好、文件越大（建议 18–23）
+  pixel_format: "yuv420p"
+  audio_codec: "aac"
+  audio_bitrate: "128k"
+  movflags: "+faststart" # 便于网页/手机边下边播

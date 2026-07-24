@@ -1,0 +1,48 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+.python-version
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Analysis cache (regenerable) ---
+frames/
+
+# --- Media (large binaries; keep sources local) ---
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.m4v
+
+# --- Images ---
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.bmp
+*.tif
+*.tiff
+*.ico
+*.svg
+images/
+
+# --- Optional local overrides ---
+config.local.yaml
+*.filter.txt
