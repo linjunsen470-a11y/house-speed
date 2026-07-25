@@ -19,18 +19,20 @@ venv/
 Thumbs.db
 desktop.ini
 
-# --- Analysis cache (regenerable) ---
+# --- Runtime / regenerable artifacts ---
 frames/
+legacy/
+*.log
+*.part.mp4
+.*.part.mp4
 
-# --- Media (large binaries; keep sources local) ---
+# --- Media (keep local; never commit) ---
 *.mp4
 *.mov
 *.avi
 *.mkv
 *.webm
 *.m4v
-
-# --- Images ---
 *.jpg
 *.jpeg
 *.png
@@ -43,6 +45,9 @@ frames/
 *.svg
 images/
 
-# --- Optional local overrides ---
+# --- Optional local overrides / scratch ---
 config.local.yaml
+*.edit.yaml
 *.filter.txt
+labels.yaml
+*.labels.yaml

@@ -12,6 +12,9 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
+import io
+import json
 import sys
 from pathlib import Path
 
@@ -44,7 +47,36 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Only analyze and print segment plan; do not run ffmpeg",
+        help=(
+            "Analyze and print segment plan; skip final export "
+            "(review proxy still encodes if --review is set)"
+        ),
+    )
+    parser.add_argument(
+        "--reanalyze",
+        action="store_true",
+        help="Ignore a matching motion cache and analyze frames again",
+    )
+    parser.add_argument(
+        "--edit-config",
+        default=None,
+        help="Per-video YAML layer (default: <input-stem>.edit.yaml if present)",
+    )
+    parser.add_argument(
+        "--review",
+        nargs="?",
+        const=True,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Create an annotated low-res review proxy (optional path); "
+            "encodes even with --dry-run"
+        ),
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print only a machine-readable JSON result",
     )
     args = parser.parse_args(argv)
 
@@ -67,17 +99,30 @@ def main(argv: list[str] | None = None) -> int:
         if alt.is_file():
             config_path = str(alt)
         else:
-            print(f"Warning: config not found ({args.config}), using built-in defaults")
+            if not args.json:
+                print(f"Warning: config not found ({args.config}), using built-in defaults")
             config_path = None
 
     try:
-        run_pipeline(
-            input_path=args.input,
-            output_path=args.output,
-            config_path=config_path,
-            dry_run=args.dry_run,
-        )
+        kwargs = {
+            "input_path": args.input,
+            "output_path": args.output,
+            "config_path": config_path,
+            "dry_run": args.dry_run,
+            "edit_config_path": args.edit_config,
+            "reanalyze": args.reanalyze,
+            "review_path": args.review,
+        }
+        if args.json:
+            with redirect_stdout(io.StringIO()):
+                result = run_pipeline(**kwargs)
+            print(json.dumps(result.summary, ensure_ascii=False))
+        else:
+            run_pipeline(**kwargs)
     except Exception as e:
+        if args.json:
+            print(json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False))
+            return 1
         print(f"Error: {e}", file=sys.stderr)
         return 1
     return 0

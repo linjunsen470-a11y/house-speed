@@ -9,12 +9,15 @@
 io:
   # 未指定 -o 时的输出命名：{stem}_edited.mp4
   output_suffix: "_edited"
-  # 中间产物目录：frames/<视频名>/
+  # 中间产物目录：frames/<stem>-<sha1前8位>/（旧的 frames/<stem>/ 为遗留路径）
   work_dir: "frames"
   # 是否写出 motion.csv / segments.json / filter_complex.txt
   save_motion_csv: true
   save_segments_json: true
   save_filter_script: true
+
+cache:
+  enabled: true
 
 # --- 运动 / 结构分析 -----------------------------------------------------------
 analysis:
@@ -28,10 +31,12 @@ analysis:
   smooth_window: 7
 
 # --- 分类阈值（决定 room / move / fast）---------------------------------------
-# 先算 wall / very_fast / transitional，再按优先级贴标签：
-#   wall 或 very_fast → fast
-#   transitional      → move
-#   其余              → room
+# 优先级大致为：
+#   纯空墙 wall → fast
+#   高速但结构丰富（阳台外景扫景）→ room（保护，不按 fast）
+#   高速且结构弱 → fast
+#   transitional → move
+#   其余 → room
 classify:
   # 白墙 / 门板 / 过曝空镜：边缘少 + 对比度低
   wall_edge_max: 0.035
@@ -43,6 +48,11 @@ classify:
   # 过渡行走：运动偏大且结构偏弱（房间内缓推通常 edge 较高，不会进这里）
   transitional_motion: 10.5
   transitional_edge_max: 0.055
+
+  # 风景/外景保护：运动再大，只要边缘密度够高（楼群、树、天际线），
+  # 视为有意义扫景，保持 room，避免阳台外景被 3.5× 快进。
+  # 阈值宜高于一般室内（室内家具 edge 常在 0.05～0.14）
+  scenic_edge_min: 0.16
 
 # --- 各类速度倍率（>1 为加速；1 为原速）---------------------------------------
 # 注意：不会丢弃任何时间段，只改变播放速度
@@ -61,6 +71,9 @@ segments:
 # after = 相对该 room 段起点的秒数；speed = 该区间播放倍率。
 pacing:
   enabled: true
+  # 子段平均边缘 ≥ 该值时跳过停留衰减（可比 scenic_edge_min 略高，避免室内误免衰减）
+  scenic_skip_hold_ramp: true
+  scenic_skip_edge_min: 0.18
   room_hold_ramp:
     - after: 0.0
       speed: 1.0    # 前几秒建立空间感
@@ -84,11 +97,28 @@ pacing:
 overrides: []
 
 # --- 编码导出 -----------------------------------------------------------------
+# 变速必须重编码，无法 stream copy。
+# 旧默认 libx264 + crf 20 会把微信/HEVC 低码率片压成 2～4 倍体积——不是剪辑逻辑错。
 encode:
-  video_codec: "libx264"
-  preset: "medium"       # ultrafast … veryslow
-  crf: 20                # 越小画质越好、文件越大（建议 18–23）
+  # true：按原片视频/音频码率重编码（原片 HEVC → libx265），成片通常更短也更小
+  match_source: true
+  # 相对原片视频码率的倍率（0.9 更小；1.2 略清晰）
+  bitrate_scale: 1.0
+  # match_source 时 video_codec 建议 auto（跟原片）；可强制 libx264 / libx265
+  video_codec: "auto"
+  preset: "medium"
   pixel_format: "yuv420p"
   audio_codec: "aac"
-  audio_bitrate: "128k"
-  movflags: "+faststart" # 便于网页/手机边下边播
+  # 仅当 match_source: false 时使用 CRF 模式
+  crf: 28
+  audio_bitrate: "64k"
+  movflags: "+faststart"
+
+review:
+  width: 540
+  fps: 12
+  video_bitrate: "900k"
+  preset: "ultrafast"
+  # drawtext 字体（Windows 建议 arial.ttf / msyh.ttc）；留空则自动探测
+  # fontfile: "C:/Windows/Fonts/arial.ttf"
+  fontfile: ""

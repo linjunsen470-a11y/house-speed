@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import math
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,9 @@ DEFAULTS: dict[str, Any] = {
         "save_segments_json": True,
         "save_filter_script": True,
     },
+    "cache": {
+        "enabled": True,
+    },
     "analysis": {
         "resize_width": 135,
         "resize_height": 240,
@@ -29,6 +33,7 @@ DEFAULTS: dict[str, Any] = {
         "very_fast_motion": 14.0,
         "transitional_motion": 10.5,
         "transitional_edge_max": 0.055,
+        "scenic_edge_min": 0.16,
     },
     "speeds": {
         "room": 1.0,
@@ -40,6 +45,8 @@ DEFAULTS: dict[str, Any] = {
     },
     "pacing": {
         "enabled": True,
+        "scenic_skip_hold_ramp": True,
+        "scenic_skip_edge_min": 0.18,
         "room_hold_ramp": [
             {"after": 0.0, "speed": 1.0},
             {"after": 4.0, "speed": 1.5},
@@ -49,13 +56,23 @@ DEFAULTS: dict[str, Any] = {
     },
     "overrides": [],
     "encode": {
-        "video_codec": "libx264",
+        "match_source": True,
+        "bitrate_scale": 1.0,
+        "video_codec": "auto",
         "preset": "medium",
-        "crf": 20,
+        "crf": 28,
         "pixel_format": "yuv420p",
         "audio_codec": "aac",
-        "audio_bitrate": "128k",
+        "audio_bitrate": "64k",
         "movflags": "+faststart",
+    },
+    "review": {
+        "width": 540,
+        "fps": 12,
+        "video_bitrate": "900k",
+        "preset": "ultrafast",
+        # Optional absolute path to a .ttf/.ttc for drawtext (auto-detect if empty)
+        "fontfile": "",
     },
 }
 
@@ -74,6 +91,7 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     """Load YAML config and merge onto defaults."""
     cfg = deepcopy(DEFAULTS)
     if path is None:
+        _validate(cfg)
         return cfg
     p = Path(path)
     if not p.is_file():
@@ -87,22 +105,70 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     return cfg
 
 
+def merge_config_file(cfg: dict[str, Any], path: str | Path) -> dict[str, Any]:
+    """Deep-merge one YAML layer onto an already loaded configuration."""
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Config not found: {p}")
+    with open(p, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"Config root must be a mapping: {p}")
+    merged = _deep_merge(cfg, data)
+    _validate(merged)
+    return merged
+
+
+def _number(value: Any, name: str, *, minimum: float | None = None) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if not math.isfinite(out):
+        raise ValueError(f"{name} must be finite")
+    if minimum is not None and out < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    return out
+
+
 def _validate(cfg: dict[str, Any]) -> None:
+    analysis = cfg["analysis"]
+    for key in ("resize_width", "resize_height"):
+        analysis[key] = int(_number(analysis[key], f"analysis.{key}", minimum=1))
+    low = int(_number(analysis["canny_low"], "analysis.canny_low", minimum=0))
+    high = int(_number(analysis["canny_high"], "analysis.canny_high", minimum=0))
+    if low > 255 or high > 255 or low >= high:
+        raise ValueError("analysis Canny thresholds must satisfy 0 <= low < high <= 255")
+    analysis["canny_low"], analysis["canny_high"] = low, high
+
     speeds = cfg["speeds"]
     for kind in ("room", "move", "fast"):
         if kind not in speeds:
             raise ValueError(f"speeds.{kind} is required")
-        if float(speeds[kind]) <= 0:
+        value = _number(speeds[kind], f"speeds.{kind}", minimum=0)
+        if value <= 0:
             raise ValueError(f"speeds.{kind} must be > 0")
+        speeds[kind] = value
 
-    sw = int(cfg["analysis"]["smooth_window"])
-    if sw < 1:
-        raise ValueError("analysis.smooth_window must be >= 1")
-    cfg["analysis"]["smooth_window"] = sw if sw % 2 == 1 else sw + 1
+    sw = int(_number(analysis["smooth_window"], "analysis.smooth_window", minimum=1))
+    analysis["smooth_window"] = sw if sw % 2 else sw + 1
 
-    md = float(cfg["segments"]["min_duration"])
-    if md < 0:
-        raise ValueError("segments.min_duration must be >= 0")
+    classify = cfg["classify"]
+    for key in ("wall_edge_max", "transitional_edge_max", "scenic_edge_min"):
+        value = _number(classify[key], f"classify.{key}", minimum=0)
+        if value > 1:
+            raise ValueError(f"classify.{key} must be <= 1")
+        classify[key] = value
+    wall_std = _number(classify["wall_std_max"], "classify.wall_std_max", minimum=0)
+    if wall_std > 255:
+        raise ValueError("classify.wall_std_max must be <= 255")
+    classify["wall_std_max"] = wall_std
+    for key in ("very_fast_motion", "transitional_motion"):
+        classify[key] = _number(classify[key], f"classify.{key}", minimum=0)
+
+    cfg["segments"]["min_duration"] = _number(
+        cfg["segments"]["min_duration"], "segments.min_duration", minimum=0
+    )
 
     pacing = cfg.get("pacing") or {}
     ramp = list(pacing.get("room_hold_ramp") or [])
@@ -111,15 +177,21 @@ def _validate(cfg: dict[str, Any]) -> None:
             raise ValueError(
                 f"pacing.room_hold_ramp[{i}] needs after and speed"
             )
-        if float(step["speed"]) <= 0:
+        if _number(step["speed"], f"pacing.room_hold_ramp[{i}].speed") <= 0:
             raise ValueError(f"pacing.room_hold_ramp[{i}].speed must be > 0")
-        if float(step["after"]) < 0:
-            raise ValueError(f"pacing.room_hold_ramp[{i}].after must be >= 0")
-    # sort ascending by after for stable lookup
+        _number(step["after"], f"pacing.room_hold_ramp[{i}].after", minimum=0)
     if ramp:
         cfg.setdefault("pacing", {})["room_hold_ramp"] = sorted(
             ramp, key=lambda s: float(s["after"])
         )
+    scenic = _number(
+        pacing.get("scenic_skip_edge_min", 0.18),
+        "pacing.scenic_skip_edge_min",
+        minimum=0,
+    )
+    if scenic > 1:
+        raise ValueError("pacing.scenic_skip_edge_min must be <= 1")
+    cfg.setdefault("pacing", {})["scenic_skip_edge_min"] = scenic
 
     for i, ov in enumerate(cfg.get("overrides") or []):
         if "start" not in ov or "end" not in ov or "kind" not in ov:
@@ -130,5 +202,40 @@ def _validate(cfg: dict[str, Any]) -> None:
             raise ValueError(
                 f"overrides[{i}].kind must be one of {list(speeds)}"
             )
-        if float(ov["end"]) <= float(ov["start"]):
+        start = _number(ov["start"], f"overrides[{i}].start", minimum=0)
+        end = _number(ov["end"], f"overrides[{i}].end", minimum=0)
+        if end <= start:
             raise ValueError(f"overrides[{i}]: end must be > start")
+        ov["start"], ov["end"] = start, end
+
+    enc = cfg["encode"]
+    scale = _number(enc.get("bitrate_scale", 1.0), "encode.bitrate_scale")
+    if scale <= 0:
+        raise ValueError("encode.bitrate_scale must be > 0")
+    enc["bitrate_scale"] = scale
+    codec = str(enc.get("video_codec", "auto")).lower()
+    allowed = {"auto", "libx264", "h264", "libx265", "hevc", "h265"}
+    if codec not in allowed:
+        raise ValueError(f"encode.video_codec must be one of {sorted(allowed)}")
+    enc["video_codec"] = codec
+    if not str(enc.get("preset", "")).strip():
+        raise ValueError("encode.preset must not be empty")
+    _number(enc.get("crf", 28), "encode.crf", minimum=0)
+
+    review = cfg.get("review") or {}
+    review["width"] = int(
+        _number(review.get("width", 540), "review.width", minimum=2)
+    )
+    if review["width"] % 2:
+        review["width"] += 1
+    review["fps"] = int(_number(review.get("fps", 12), "review.fps", minimum=1))
+    review["fps"] = min(review["fps"], 30)
+    fontfile = str(review.get("fontfile") or "").strip()
+    if fontfile:
+        font_path = Path(fontfile)
+        if not font_path.is_file():
+            raise ValueError(f"review.fontfile not found: {font_path}")
+        review["fontfile"] = str(font_path)
+    else:
+        review["fontfile"] = ""
+    cfg["review"] = review
