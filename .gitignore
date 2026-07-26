@@ -26,7 +26,7 @@ legacy/
 *.part.mp4
 .*.part.mp4
 
-# --- Media (keep local; never commit) ---
+# --- Media (local only) ---
 *.mp4
 *.mov
 *.avi
@@ -45,9 +45,32 @@ legacy/
 *.svg
 images/
 
+# Keep pack asset previews + generated stickers + small fonts in repo
+!assets/
+!assets/**
+!assets/text_previews/*.png
+!assets/stickers/*.apng
+!assets/fonts/*.ttf
+!assets/fonts/*.otf
+# BGM audio is large — download via scripts/fetch_bgm.py; keep docs
+assets/music/**
+!assets/music/README.md
+# Raw emoji GIF cache / scratch (APNG stickers are the production asset)
+assets/stickers/external/
+assets/stickers/_candidates/
+assets/stickers/preview_*.jpg
+assets/stickers/preview_*.png
+assets/stickers/_test.png
+# Optional large CJK fonts (download yourself)
+assets/fonts/LXGW*.ttf
+assets/fonts/SourceHan*
+assets/fonts/NotoSans*
+
 # --- Optional local overrides / scratch ---
 config.local.yaml
 *.edit.yaml
+!examples/**/*.yaml
+!examples/**/*.edit.yaml
 *.filter.txt
 labels.yaml
 *.labels.yaml

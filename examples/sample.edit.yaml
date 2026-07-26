@@ -1,0 +1,30 @@
+# 复制为 <视频stem>.edit.yaml，例如 1.edit.yaml
+# python edit_speed.py 1.mp4 --pack
+
+pack:
+  # 可选：douyin_fire / douyin_pink / douyin_lemon / douyin_mint /
+  #       douyin_gold / douyin_violet / douyin_sky / douyin_candy
+  style: "douyin_fire"
+  text:
+    lines:
+      - "绿湖全新未入住"
+      - "101平三房"
+      - "业主忍痛割爱"
+      - "单价5XXX"
+  # 位置/大小（0~1 相对画面；贴纸 x/y 是中心锚点）
+  layout:
+    y_rel: 0.30            # 花字块中心上下：越小越靠上
+    max_width_rel: 0.90
+    # font_size_rel: 0.082 # 覆盖默认字号
+    # line_gap_rel: -0.006 # 行距；负值更紧
+  sticker:
+    # dm_emoji_bubble | dm_emoji_heart | dm_emoji_mail | dm_emoji_point | ...
+    style: "dm_emoji_bubble"
+    start: 5.0             # 第几秒开始出现
+    width_rel: 0.34        # 贴纸宽度
+    x: 0.16                # 左下≈0.16 / 右下≈0.84
+    y: 0.90                # 越接近 1 越靠底
+  audio:
+    # carefree | easy_lemon | life_of_riley | summer_day | dreamlike | bittersweet | random
+    bgm: "carefree"
+    volume: 0.80

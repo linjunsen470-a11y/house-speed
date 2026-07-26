@@ -78,7 +78,51 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print only a machine-readable JSON result",
     )
+    parser.add_argument(
+        "--pack",
+        action="store_true",
+        help=(
+            "After speed-edit, burn full-video title + DM sticker and "
+            "replace audio with BGM only (see pack.* in config / .edit.yaml)"
+        ),
+    )
+    parser.add_argument(
+        "--pack-only",
+        action="store_true",
+        help="Skip analyze/export; re-pack existing work/*/speed_raw.mp4",
+    )
+    parser.add_argument(
+        "--list-styles",
+        action="store_true",
+        help="List built-in title styles, stickers, and BGM presets, then exit",
+    )
     args = parser.parse_args(argv)
+
+    if args.list_styles:
+        root = Path(__file__).resolve().parent
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from walkthrough_edit.music_catalog import BGM_PRESETS
+        from walkthrough_edit.stickers_gen import STICKER_SPECS
+        from walkthrough_edit.text_styles import STYLES, list_styles
+
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+        print("Title styles (pack.style):")
+        for key in list_styles():
+            print(f"  {key:16s}  {STYLES[key].get('label', '')}")
+        print("\nSticker styles (pack.sticker.style):")
+        for key, meta in STICKER_SPECS.items():
+            print(f"  {key:16s}  {meta.get('label', '')}")
+        print("\nBGM presets (pack.audio.bgm):")
+        print("  random           从内置曲库随机选一首")
+        for key, meta in BGM_PRESETS.items():
+            print(
+                f"  {key:16s}  {meta.get('label', '')}  — {meta.get('vibe', '')}"
+            )
+        return 0
 
     if not args.input:
         parser.print_help()
@@ -112,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
             "edit_config_path": args.edit_config,
             "reanalyze": args.reanalyze,
             "review_path": args.review,
+            "pack": True if args.pack else None,
+            "pack_only": bool(args.pack_only),
         }
         if args.json:
             with redirect_stdout(io.StringIO()):

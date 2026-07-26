@@ -122,3 +122,46 @@ review:
   # drawtext 字体（Windows 建议 arial.ttf / msyh.ttc）；留空则自动探测
   # fontfile: "C:/Windows/Fonts/arial.ttf"
   fontfile: ""
+
+# --- 成片包装（短视频花字 + 私信贴纸 + 仅 BGM）------------------------------
+# 用法：python edit_speed.py 素材.mp4 --pack
+# 列出样式：python edit_speed.py --list-styles
+pack:
+  enabled: false
+  assets_dir: "assets"
+  # 花字（多层描边，非字幕条）：
+  #   douyin_fire | douyin_pink | douyin_lemon | douyin_mint |
+  #   douyin_gold | douyin_violet | douyin_sky | douyin_candy
+  style: "douyin_fire"
+  fontfile: ""
+  text:
+    # 推荐用 lines（最多 5 行），也兼容 line1..line4
+    lines: []
+    # line1: "绿湖全新未入住"
+    # line2: "101平三房"
+    # line3: "业主忍痛割爱"
+    # line4: "单价5XXX"
+  layout:
+    y_rel: 0.30          # 花字块中心：0=顶 1=底（0.30≈偏上）
+    max_width_rel: 0.90  # 花字最大宽度占画面宽
+    # font_size_rel: 0.082  # 可选：覆盖样式默认字号（相对画面短边）
+    # line_gap_rel: -0.006  # 可选：行距；0更紧，负值再贴紧（描边留白重叠）
+  sticker:
+    enabled: true
+    # dm_emoji_bubble | dm_emoji_heart | dm_emoji_mail | dm_emoji_point
+    # | dm_follow_me | dm_pink_wave | dm_chat_pop | dm_heart_tap | dm_bell_cute | dm_hand_cute
+    style: "dm_emoji_bubble"
+    start: 5.0
+    width_rel: 0.30      # 贴纸宽度占画面宽（越大贴纸越大）
+    x: 0.16              # 贴纸中心水平：0=左 0.5=中 1=右
+    y: 0.90              # 贴纸中心垂直：0=顶 1=底
+    file: ""             # 自备透明 APNG/GIF/WebM 时填路径
+  audio:
+    # 内置：carefree | easy_lemon | life_of_riley | summer_day | dreamlike | bittersweet | random
+    # 或路径：assets/music/xxx.mp3（见 assets/music/README.md，CC BY 署名）
+    bgm: "carefree"
+    volume: 0.80
+    fade_in: 0.5
+    fade_out: 0.8
+
+

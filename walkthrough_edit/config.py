@@ -74,6 +74,40 @@ DEFAULTS: dict[str, Any] = {
         # Optional absolute path to a .ttf/.ttc for drawtext (auto-detect if empty)
         "fontfile": "",
     },
+    # Stage-B packaging: short-video 花字 + 私信贴纸 + BGM only
+    "pack": {
+        "enabled": False,
+        "assets_dir": "assets",
+        "style": "douyin_fire",
+        "fontfile": "",
+        "text": {
+            "lines": [],
+            "line1": "",
+            "line2": "",
+            "line3": "",
+            "line4": "",
+        },
+        "layout": {
+            "y_rel": 0.30,
+            "max_width_rel": 0.90,
+            # optional: font_size_rel, line_gap_rel (see validate)
+        },
+        "sticker": {
+            "enabled": True,
+            "style": "dm_emoji_bubble",
+            "start": 5.0,
+            "width_rel": 0.30,
+            "x": 0.16,
+            "y": 0.90,
+            "file": "",
+        },
+        "audio": {
+            "bgm": "carefree",
+            "volume": 0.80,
+            "fade_in": 0.5,
+            "fade_out": 0.8,
+        },
+    },
 }
 
 
@@ -239,3 +273,82 @@ def _validate(cfg: dict[str, Any]) -> None:
     else:
         review["fontfile"] = ""
     cfg["review"] = review
+
+    pack = cfg.get("pack") or {}
+    pack["enabled"] = bool(pack.get("enabled", False))
+    pack["assets_dir"] = str(pack.get("assets_dir") or "assets")
+    pack["style"] = str(pack.get("style") or "douyin_fire")
+    pack["fontfile"] = str(pack.get("fontfile") or "").strip()
+    text = pack.get("text") or {}
+    if not isinstance(text, dict):
+        raise ValueError("pack.text must be a mapping")
+    lines_val = text.get("lines")
+    if lines_val is None:
+        lines_list: list[str] = []
+    elif isinstance(lines_val, list):
+        lines_list = [str(x) for x in lines_val]
+    else:
+        raise ValueError("pack.text.lines must be a list of strings")
+    pack["text"] = {
+        "lines": lines_list,
+        "line1": str(text.get("line1") or text.get("title") or ""),
+        "line2": str(text.get("line2") or text.get("subtitle") or ""),
+        "line3": str(text.get("line3") or text.get("price") or ""),
+        "line4": str(text.get("line4") or ""),
+        "line5": str(text.get("line5") or ""),
+    }
+    layout = pack.get("layout") or {}
+    if not isinstance(layout, dict):
+        raise ValueError("pack.layout must be a mapping")
+    layout_out: dict[str, Any] = {
+        "y_rel": _number(layout.get("y_rel", 0.30), "pack.layout.y_rel", minimum=0),
+        "max_width_rel": _number(
+            layout.get("max_width_rel", 0.90), "pack.layout.max_width_rel", minimum=0.4
+        ),
+    }
+    if layout.get("font_size_rel") is not None and str(layout.get("font_size_rel")).strip() != "":
+        layout_out["font_size_rel"] = _number(
+            layout.get("font_size_rel"), "pack.layout.font_size_rel", minimum=0.03
+        )
+        if layout_out["font_size_rel"] > 0.2:
+            raise ValueError("pack.layout.font_size_rel must be <= 0.2")
+    if layout.get("line_gap_rel") is not None and str(layout.get("line_gap_rel")).strip() != "":
+        # allow negative to tighten (pull glyph pads together)
+        layout_out["line_gap_rel"] = _number(
+            layout.get("line_gap_rel"), "pack.layout.line_gap_rel", minimum=-0.05
+        )
+        if layout_out["line_gap_rel"] > 0.08:
+            raise ValueError("pack.layout.line_gap_rel must be <= 0.08")
+    pack["layout"] = layout_out
+    if pack["layout"]["y_rel"] > 1:
+        raise ValueError("pack.layout.y_rel must be <= 1")
+    if pack["layout"]["max_width_rel"] > 1:
+        raise ValueError("pack.layout.max_width_rel must be <= 1")
+    st = pack.get("sticker") or {}
+    if not isinstance(st, dict):
+        raise ValueError("pack.sticker must be a mapping")
+    pack["sticker"] = {
+        "enabled": bool(st.get("enabled", True)),
+        "style": str(st.get("style") or "dm_emoji_bubble"),
+        "start": _number(st.get("start", 5.0), "pack.sticker.start", minimum=0),
+        "width_rel": _number(st.get("width_rel", 0.30), "pack.sticker.width_rel", minimum=0.05),
+        "x": _number(st.get("x", 0.16), "pack.sticker.x", minimum=0),
+        "y": _number(st.get("y", 0.90), "pack.sticker.y", minimum=0),
+        "file": str(st.get("file") or "").strip(),
+    }
+    if pack["sticker"]["width_rel"] > 0.6:
+        raise ValueError("pack.sticker.width_rel must be <= 0.6")
+    if pack["sticker"]["x"] > 1 or pack["sticker"]["y"] > 1:
+        raise ValueError("pack.sticker.x/y must be in 0..1")
+    audio = pack.get("audio") or {}
+    if not isinstance(audio, dict):
+        raise ValueError("pack.audio must be a mapping")
+    pack["audio"] = {
+        "bgm": str(audio.get("bgm") or "").strip(),
+        "volume": _number(audio.get("volume", 0.85), "pack.audio.volume", minimum=0),
+        "fade_in": _number(audio.get("fade_in", 0.5), "pack.audio.fade_in", minimum=0),
+        "fade_out": _number(audio.get("fade_out", 0.8), "pack.audio.fade_out", minimum=0),
+    }
+    if pack["audio"]["volume"] > 2:
+        raise ValueError("pack.audio.volume must be <= 2")
+    cfg["pack"] = pack

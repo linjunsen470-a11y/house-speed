@@ -13,11 +13,13 @@ from walkthrough_edit.classify import (
 )
 from walkthrough_edit.config import load_config
 from walkthrough_edit.pipeline import run_pipeline
+from walkthrough_edit.pack import render_title_overlay, resolve_font
 from walkthrough_edit.render import (
     atempo_chain,
     estimate_output_duration,
     select_video_codec,
 )
+from walkthrough_edit.text_styles import get_style, list_styles
 
 
 def segment(t0, t1, kind, speed):
@@ -136,6 +138,62 @@ class ConfigAndCliTests(unittest.TestCase):
             with patch("walkthrough_edit.pipeline.check_tools"):
                 with self.assertRaisesRegex(ValueError, "different"):
                     run_pipeline(path, path, config_path=None, dry_run=True)
+
+
+class PackTests(unittest.TestCase):
+    def test_styles_exist(self):
+        names = list_styles()
+        self.assertIn("douyin_fire", names)
+        self.assertIn("douyin_pink", names)
+        self.assertGreaterEqual(len(names), 6)
+        style = get_style("douyin_fire")
+        self.assertIn("stroke_outer", style)
+        self.assertEqual(style["kind"], "douyin")
+
+    def test_legacy_style_aliases(self):
+        # Old plain styles map to punchy douyin skins
+        self.assertEqual(get_style("bar_dark")["fill"], get_style("douyin_fire")["fill"])
+
+    def test_unknown_style_raises(self):
+        with self.assertRaisesRegex(ValueError, "Unknown text style"):
+            get_style("not_a_real_style")
+
+    def test_render_title_overlay_png(self):
+        cfg = load_config(None)
+        font = resolve_font(cfg, Path("assets").resolve())
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "title.png"
+            path = render_title_overlay(
+                ["绿湖全新未入住", "101平三房", "业主忍痛割爱", "单价5XXX"],
+                "douyin_fire",
+                540,
+                960,
+                font,
+                out,
+            )
+            self.assertIsNotNone(path)
+            self.assertTrue(path.is_file())
+            self.assertGreater(path.stat().st_size, 2000)
+
+    def test_pack_config_defaults(self):
+        cfg = load_config(None)
+        self.assertIn("pack", cfg)
+        self.assertFalse(cfg["pack"]["enabled"])
+        self.assertEqual(cfg["pack"]["style"], "douyin_fire")
+        self.assertEqual(cfg["pack"]["sticker"]["style"], "dm_emoji_bubble")
+
+    def test_bgm_resolve_presets(self):
+        from walkthrough_edit.music_catalog import BGM_PRESETS, resolve_bgm_path
+
+        assets = Path(__file__).resolve().parents[1] / "assets"
+        for key in BGM_PRESETS:
+            path = assets / "music" / BGM_PRESETS[key]["file"]
+            if not path.is_file():
+                self.skipTest(f"BGM file missing: {path.name}")
+        p = resolve_bgm_path("carefree", assets)
+        self.assertTrue(p.is_file())
+        p2 = resolve_bgm_path("random", assets, rng=__import__("random").Random(0))
+        self.assertTrue(p2.is_file())
 
 
 class EvaluationTests(unittest.TestCase):

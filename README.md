@@ -36,9 +36,82 @@ python edit_speed.py path/to/input.mp4 --dry-run
 
 # dry-run + review 代理：仍会编码低分辨率标注片，但不导出最终成片
 python edit_speed.py path/to/input.mp4 --dry-run --review
+
+# 首次准备素材（字体 / 贴纸 / BGM 曲库）
+python scripts/bootstrap_assets.py
+# 仅重新下载 BGM：
+python scripts/fetch_bgm.py
+
+# 变速 + 包装成片（全程花字 + 动态私信贴纸 + 仅 BGM）
+python edit_speed.py path/to/input.mp4 --pack
+
+# 只改花字/贴纸/BGM，复用已有 speed_raw
+python edit_speed.py path/to/input.mp4 --pack-only
+
+# 列出花字样式、贴纸 id、BGM 预设
+python edit_speed.py --list-styles
 ```
 
 成片默认写到：`<原文件名>_edited.mp4`（后缀可在配置里改）。
+
+### 包装成片（`--pack`）
+
+在变速之后叠加：
+
+1. **花字**：多层描边短视频花字（最多 5 行），**从片头到片尾**  
+2. **动态私信贴纸**：一体角标（emoji +「私信我」），从 `pack.sticker.start` 秒起一直到结束  
+3. **音频**：删除原声，只保留 BGM（内置 6 首免版税纯音乐，或自备路径）  
+
+每视频可写 **`<stem>.edit.yaml`**（示例见 `examples/sample.edit.yaml`），覆盖 `config.yaml` 里的 `pack.*`。  
+素材与样式明细见 **`assets/README.md`**、BGM 署名见 **`assets/music/README.md`**。
+
+#### 每视频配置示例（`1.edit.yaml`）
+
+```yaml
+pack:
+  style: "douyin_fire"       # 花字样式
+  text:
+    lines:
+      - "绿湖全新未入住"
+      - "101平三房"
+      - "业主忍痛割爱"
+      - "单价5XXX"
+  layout:
+    y_rel: 0.30              # 花字块中心上下：0=顶 1=底
+    # font_size_rel: 0.082   # 可选：字号
+    # line_gap_rel: -0.006   # 可选：行距（负值更紧）
+  sticker:
+    style: "dm_emoji_bubble" # 或 dm_emoji_heart / mail / point
+    start: 4.0
+    width_rel: 0.36          # 贴纸宽度占画面宽
+    x: 0.20                  # 贴纸中心水平 0~1
+    y: 0.91                  # 贴纸中心垂直 0~1
+  audio:
+    bgm: "carefree"          # 见下方 BGM 表；也可用 random / 文件路径
+    volume: 0.80
+```
+
+| 想调什么 | 字段 |
+|----------|------|
+| 标题上下位置 | `layout.y_rel` |
+| 标题字号 / 行距 | `layout.font_size_rel` / `layout.line_gap_rel` |
+| 贴纸位置 / 大小 | `sticker.x` `sticker.y` `sticker.width_rel` |
+| 贴纸何时出现 | `sticker.start` |
+| 背景音乐 | `audio.bgm`（预设 id / `random` / 路径） |
+
+#### 内置 BGM（CC BY，需署名）
+
+| id | 气质 |
+|----|------|
+| `carefree` | 轻松明亮（默认） |
+| `easy_lemon` | 柔和俏皮 |
+| `life_of_riley` | 温暖愉快 |
+| `summer_day` | 夏日通透 |
+| `dreamlike` | 柔和梦幻 |
+| `bittersweet` | 轻情绪叙事 |
+| `random` | 随机一首内置 |
+
+音频文件较大，默认不进 Git；本地执行 `python scripts/fetch_bgm.py` 下载。
 
 运行时会在本地生成中间产物（可删，可忽略提交）：
 
@@ -63,14 +136,19 @@ clip/
 ├── config.yaml                # 主配置
 ├── requirements.txt
 ├── README.md
-├── tests/                     # 单元测试（不依赖视频素材）
-└── walkthrough_edit/          # 核心包
-    ├── __init__.py
-    ├── config.py              # 加载 / 合并 / 校验 YAML
-    ├── analyze.py             # 逐帧 motion / edge / std
-    ├── classify.py            # room|move|fast 分类与分段
-    ├── render.py              # ffmpeg 滤镜与导出
-    └── pipeline.py            # 端到端编排
+├── assets/                    # 字体 / 贴纸 / 音乐说明（见 assets/README.md）
+├── examples/sample.edit.yaml  # 每视频包装配置示例
+├── scripts/
+│   ├── bootstrap_assets.py    # 字体 + 贴纸 + BGM
+│   └── fetch_bgm.py           # 仅下载 BGM 曲库
+├── tests/
+└── walkthrough_edit/
+    ├── config.py / analyze.py / classify.py
+    ├── render.py / pipeline.py
+    ├── pack.py                # 花字 + 贴纸 + BGM
+    ├── text_styles.py         # 花字样式
+    ├── stickers_gen.py        # 动态贴纸生成
+    └── music_catalog.py       # BGM 预设与路径解析
 ```
 
 ### 流水线
@@ -91,7 +169,10 @@ segments 合并过短碎片 → overrides → 停留衰减 → 时间线校验
 render   ffmpeg：trim + setpts(加速) + atempo + concat
    │
    ▼
-*_edited.mp4   （全片段保留，仅速度变化）
+pack（可选 --pack）  全程花字 + 动态私信贴纸 + 仅 BGM
+   │
+   ▼
+*_edited.mp4
 ```
 
 | 标签 | 默认速度 | 含义 |
@@ -264,6 +345,9 @@ io:
 | `--reanalyze` | 忽略匹配的 motion 缓存，强制重新分析 |
 | `--edit-config PATH` | 指定每视频 YAML 覆盖层 |
 | `--json` | 仅向 stdout 打印机器可读 JSON 结果 |
+| `--pack` | 变速后包装：全程花字 + 动态贴纸 + 仅 BGM |
+| `--pack-only` | 跳过分析/变速，只对 `speed_raw.mp4` 重新包装 |
+| `--list-styles` | 列出花字样式与贴纸 id |
 
 ---
 

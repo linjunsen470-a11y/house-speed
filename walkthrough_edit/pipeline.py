@@ -11,6 +11,7 @@ from typing import Any
 from .analyze import analyze_motion
 from .classify import build_segments
 from .config import load_config, merge_config_file
+from .pack import pack_video
 from .render import (
     check_tools,
     estimate_output_duration,
@@ -140,12 +141,17 @@ def run_pipeline(
     edit_config_path: str | Path | None = None,
     reanalyze: bool = False,
     review_path: str | Path | bool | None = None,
+    pack: bool | None = None,
+    pack_only: bool = False,
 ) -> PipelineResult:
     """
-    Analyze → classify → (optional) export.
+    Analyze → classify → (optional) export → (optional) pack overlay.
 
     If config_path exists it is loaded; missing file falls back to defaults
     when config_path is None, otherwise raises.
+
+    pack=True/False overrides config pack.enabled.
+    pack_only=True reuses work/speed_raw.mp4 and only runs packaging.
     """
     input_path = Path(input_path)
     if not input_path.is_file():
@@ -175,6 +181,10 @@ def run_pipeline(
             sidecar_used = candidate
             cfg = merge_config_file(cfg, candidate)
 
+    if pack is not None:
+        cfg.setdefault("pack", {})["enabled"] = bool(pack)
+    pack_enabled = bool((cfg.get("pack") or {}).get("enabled", False)) or pack_only
+
     io = cfg["io"]
     suffix = str(io["output_suffix"])
     if output_path is None:
@@ -186,11 +196,69 @@ def run_pipeline(
 
     work = _work_dir(input_path, str(io["work_dir"]))
     work.mkdir(parents=True, exist_ok=True)
+    project_root = Path(__file__).resolve().parent.parent
+    raw_path = work / "speed_raw.mp4"
 
     print(f"Input : {input_path}")
     print(f"Config: {main_config_used or '(defaults)'}")
     if sidecar_used:
         print(f"Edit config: {sidecar_used}")
+    if pack_enabled:
+        print(f"Pack  : enabled (style={(cfg.get('pack') or {}).get('style', 'bar_dark')})")
+
+    # --- pack-only: skip analyze/export if intermediate exists ---
+    if pack_only:
+        if not raw_path.is_file():
+            raise FileNotFoundError(
+                f"pack-only requires existing intermediate: {raw_path}. "
+                "Run once without --pack-only first."
+            )
+        segs: list[dict] = []
+        seg_file = work / "segments.json"
+        if seg_file.is_file():
+            segs = json.loads(seg_file.read_text(encoding="utf-8"))
+        fps = 30.0
+        cache_meta = work / "analysis_cache.json"
+        if cache_meta.is_file():
+            try:
+                fps = float(json.loads(cache_meta.read_text(encoding="utf-8")).get("fps") or 30)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+        total_in = sum(float(s["t1"]) - float(s["t0"]) for s in segs) if segs else 0.0
+        total_out_est = estimate_output_duration(segs, fps) if segs else probe_duration(raw_path)
+        warnings: list[str] = []
+        print(f"\nPack-only -> {output_path}")
+        out_dur = pack_video(
+            raw_path, output_path, cfg, work, project_root=project_root
+        )
+        summary_path = work / "summary.json"
+        summary: dict[str, Any] = {
+            "status": "complete",
+            "pack_only": True,
+            "duration_out": out_dur,
+            "output_path": str(output_path.resolve()),
+            "work_dir": str(work.resolve()),
+            "warnings": warnings,
+        }
+        summary_path.write_text(
+            json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        print(f"Done -> {output_path} ({out_dur:.2f}s)")
+        return PipelineResult(
+            input_path=input_path,
+            output_path=output_path,
+            segments=segs,
+            duration_in=total_in,
+            duration_out_est=total_out_est,
+            duration_out=out_dur,
+            work_dir=work,
+            dry_run=False,
+            cache_hit=True,
+            summary_path=summary_path,
+            review_path=None,
+            summary=summary,
+        )
+
     print("Analyze motion...")
     rows, fps, cache_hit = _load_analysis(input_path, cfg, work, reanalyze)
     state = "cache hit" if cache_hit else "analyzed"
@@ -211,7 +279,7 @@ def run_pipeline(
         )
         print(f"  segments -> {seg_path}")
 
-    warnings: list[str] = []
+    warnings = []
     resolved_review: Path | None = None
     if review_path:
         # --review always encodes a proxy, even alongside --dry-run (final
@@ -223,7 +291,7 @@ def run_pipeline(
         export_review(input_path, resolved_review, segs, cfg, work, fps=fps)
 
     summary_path = work / "summary.json"
-    summary: dict[str, Any] = {
+    summary = {
         "status": "analyzed" if dry_run else "rendering",
         "input": {
             "path": str(input_path.resolve()),
@@ -243,6 +311,7 @@ def run_pipeline(
         "output_path": str(output_path.resolve()),
         "review_path": str(resolved_review.resolve()) if resolved_review else None,
         "work_dir": str(work.resolve()),
+        "pack_enabled": pack_enabled,
         "warnings": warnings,
         "deleted_intervals": [],
     }
@@ -272,11 +341,12 @@ def run_pipeline(
     if not io.get("save_filter_script", True):
         filter_script = work / ".filter_complex.tmp.txt"
 
-    print(f"\nExport -> {output_path}")
+    export_target = raw_path if pack_enabled else output_path
+    print(f"\nExport -> {export_target}")
     src_size = input_path.stat().st_size
     out_dur = export_video(
         input_path,
-        output_path,
+        export_target,
         segs,
         cfg,
         filter_script=filter_script,
@@ -285,6 +355,12 @@ def run_pipeline(
     )
     if not io.get("save_filter_script", True) and filter_script.exists():
         filter_script.unlink(missing_ok=True)
+
+    if pack_enabled:
+        print(f"\nPack -> {output_path}")
+        out_dur = pack_video(
+            export_target, output_path, cfg, work, project_root=project_root
+        )
 
     out_size = output_path.stat().st_size if output_path.is_file() else 0
     tolerance = max(2.0 / fps, 0.05)
@@ -298,6 +374,7 @@ def run_pipeline(
         "duration_out": out_dur,
         "output_media": output_media,
         "warnings": warnings,
+        "pack_enabled": pack_enabled,
     })
     summary_path.write_text(
         json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
