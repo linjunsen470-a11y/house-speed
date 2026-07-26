@@ -272,6 +272,16 @@ def run_pipeline(
     total_in, _ = _print_plan(segs)
     total_out_est = estimate_output_duration(segs, fps)
 
+    warnings: list[str] = []
+    # Many trim/concat nodes slow FFmpeg; soft warn only (no behavior change).
+    if len(segs) > 80:
+        msg = (
+            f"segment count is high ({len(segs)}); export may be slow. "
+            "Try raising segments.min_duration or simplifying pacing.room_hold_ramp."
+        )
+        warnings.append(msg)
+        print(f"  warning: {msg}")
+
     if io.get("save_segments_json", True):
         seg_path = work / "segments.json"
         seg_path.write_text(
@@ -279,7 +289,6 @@ def run_pipeline(
         )
         print(f"  segments -> {seg_path}")
 
-    warnings = []
     resolved_review: Path | None = None
     if review_path:
         # --review always encodes a proxy, even alongside --dry-run (final

@@ -78,31 +78,55 @@ DEFAULTS: dict[str, Any] = {
     "pack": {
         "enabled": False,
         "assets_dir": "assets",
-        "style": "douyin_fire",
+        "style": "douyin_estate",
         "fontfile": "",
         "text": {
             "lines": [],
+            "title": "",
+            "highlights": [],
+            "price": "",
             "line1": "",
             "line2": "",
             "line3": "",
             "line4": "",
         },
         "layout": {
-            "y_rel": 0.30,
-            "max_width_rel": 0.90,
-            # optional: font_size_rel, line_gap_rel (see validate)
+            "y_rel": 0.255,
+            "max_width_rel": 0.88,
+            "highlights_mode": "join",  # join | stack
+            # optional: font_size_rel, line_gap_rel, sparkle (see validate)
+        },
+        "text_motion": {
+            "enter": "fade",  # none | fade | pop
+            "duration": 0.35,
+            "bounce_px": 0.0,  # off — no text jitter
+            "bounce_period": 1.4,
+            "float_px": 0.0,  # legacy alias → bounce_px
+            "float_period": 1.4,
+            "pulse": 0.0,  # off — keep text solid
+            "pulse_period": 2.0,
+            "sparkle_anim": True,  # twinkling stars APNG on price
+            "sparkle_fps": 10,
+            "sparkle_frames": 10,
         },
         "sticker": {
             "enabled": True,
-            "style": "dm_emoji_bubble",
-            "start": 5.0,
+            "style": "dm_estate_cta",
+            "text": "私信了解",  # 私 / 私信 / 私信我 / 私信了解
+            "start": 4.5,
+            "duration": 2.5,
+            "repeat_at_end": True,
+            "end_lead": 2.8,
             "width_rel": 0.30,
             "x": 0.16,
             "y": 0.90,
             "file": "",
+            "enter": "slide_up",  # none | pop | slide_up
+            "enter_ms": 280,
+            "fps": 12,
         },
         "audio": {
-            "bgm": "carefree",
+            "bgm": "pop_hook",
             "volume": 0.80,
             "fade_in": 0.5,
             "fade_out": 0.8,
@@ -277,7 +301,7 @@ def _validate(cfg: dict[str, Any]) -> None:
     pack = cfg.get("pack") or {}
     pack["enabled"] = bool(pack.get("enabled", False))
     pack["assets_dir"] = str(pack.get("assets_dir") or "assets")
-    pack["style"] = str(pack.get("style") or "douyin_fire")
+    pack["style"] = str(pack.get("style") or "douyin_estate")
     pack["fontfile"] = str(pack.get("fontfile") or "").strip()
     text = pack.get("text") or {}
     if not isinstance(text, dict):
@@ -289,8 +313,20 @@ def _validate(cfg: dict[str, Any]) -> None:
         lines_list = [str(x) for x in lines_val]
     else:
         raise ValueError("pack.text.lines must be a list of strings")
+    highlights_val = text.get("highlights")
+    if highlights_val is None:
+        highlights_list: list[str] = []
+    elif isinstance(highlights_val, str):
+        highlights_list = [highlights_val]
+    elif isinstance(highlights_val, list):
+        highlights_list = [str(x) for x in highlights_val]
+    else:
+        raise ValueError("pack.text.highlights must be a string or list of strings")
     pack["text"] = {
         "lines": lines_list,
+        "title": str(text.get("title") or ""),
+        "highlights": highlights_list,
+        "price": str(text.get("price") or ""),
         "line1": str(text.get("line1") or text.get("title") or ""),
         "line2": str(text.get("line2") or text.get("subtitle") or ""),
         "line3": str(text.get("line3") or text.get("price") or ""),
@@ -300,11 +336,15 @@ def _validate(cfg: dict[str, Any]) -> None:
     layout = pack.get("layout") or {}
     if not isinstance(layout, dict):
         raise ValueError("pack.layout must be a mapping")
+    hl_mode = str(layout.get("highlights_mode") or "join").strip().lower()
+    if hl_mode not in {"join", "stack"}:
+        raise ValueError("pack.layout.highlights_mode must be 'join' or 'stack'")
     layout_out: dict[str, Any] = {
-        "y_rel": _number(layout.get("y_rel", 0.30), "pack.layout.y_rel", minimum=0),
+        "y_rel": _number(layout.get("y_rel", 0.255), "pack.layout.y_rel", minimum=0),
         "max_width_rel": _number(
-            layout.get("max_width_rel", 0.90), "pack.layout.max_width_rel", minimum=0.4
+            layout.get("max_width_rel", 0.88), "pack.layout.max_width_rel", minimum=0.4
         ),
+        "highlights_mode": hl_mode,
     }
     if layout.get("font_size_rel") is not None and str(layout.get("font_size_rel")).strip() != "":
         layout_out["font_size_rel"] = _number(
@@ -319,23 +359,110 @@ def _validate(cfg: dict[str, Any]) -> None:
         )
         if layout_out["line_gap_rel"] > 0.08:
             raise ValueError("pack.layout.line_gap_rel must be <= 0.08")
+    if layout.get("sparkle") is not None and str(layout.get("sparkle")).strip() != "":
+        layout_out["sparkle"] = bool(layout.get("sparkle"))
     pack["layout"] = layout_out
     if pack["layout"]["y_rel"] > 1:
         raise ValueError("pack.layout.y_rel must be <= 1")
     if pack["layout"]["max_width_rel"] > 1:
         raise ValueError("pack.layout.max_width_rel must be <= 1")
+
+    text_motion = pack.get("text_motion") or {}
+    if not isinstance(text_motion, dict):
+        raise ValueError("pack.text_motion must be a mapping")
+    tm_enter = str(text_motion.get("enter") or "none").strip().lower()
+    if tm_enter not in {"none", "fade", "pop"}:
+        raise ValueError("pack.text_motion.enter must be none|fade|pop")
+    bounce_px = text_motion.get("bounce_px")
+    if bounce_px is None:
+        bounce_px = text_motion.get("float_px", 0.0)
+    bounce_period = text_motion.get("bounce_period")
+    if bounce_period is None:
+        bounce_period = text_motion.get("float_period", 1.4)
+    pack["text_motion"] = {
+        "enter": tm_enter,
+        "duration": _number(
+            text_motion.get("duration", 0.35), "pack.text_motion.duration", minimum=0.05
+        ),
+        "bounce_px": _number(bounce_px, "pack.text_motion.bounce_px", minimum=0),
+        "bounce_period": _number(
+            bounce_period, "pack.text_motion.bounce_period", minimum=0.5
+        ),
+        "float_px": _number(bounce_px, "pack.text_motion.float_px", minimum=0),
+        "float_period": _number(
+            bounce_period, "pack.text_motion.float_period", minimum=0.5
+        ),
+        "pulse": _number(
+            text_motion.get("pulse", 0.0), "pack.text_motion.pulse", minimum=0
+        ),
+        "pulse_period": _number(
+            text_motion.get("pulse_period", 2.0),
+            "pack.text_motion.pulse_period",
+            minimum=0.8,
+        ),
+        "sparkle_anim": bool(text_motion.get("sparkle_anim", True)),
+        "sparkle_fps": int(
+            _number(text_motion.get("sparkle_fps", 10), "pack.text_motion.sparkle_fps", minimum=6)
+        ),
+        "sparkle_frames": int(
+            _number(
+                text_motion.get("sparkle_frames", 10),
+                "pack.text_motion.sparkle_frames",
+                minimum=4,
+            )
+        ),
+    }
+    if pack["text_motion"]["duration"] > 2.0:
+        raise ValueError("pack.text_motion.duration must be <= 2.0")
+    if pack["text_motion"]["bounce_px"] > 24:
+        raise ValueError("pack.text_motion.bounce_px must be <= 24")
+    if pack["text_motion"]["bounce_period"] > 8.0:
+        raise ValueError("pack.text_motion.bounce_period must be <= 8")
+    if pack["text_motion"]["pulse"] > 0.2:
+        raise ValueError("pack.text_motion.pulse must be <= 0.2")
+    if pack["text_motion"]["pulse_period"] > 8.0:
+        raise ValueError("pack.text_motion.pulse_period must be <= 8")
+    if pack["text_motion"]["sparkle_fps"] > 24:
+        raise ValueError("pack.text_motion.sparkle_fps must be <= 24")
+    if pack["text_motion"]["sparkle_frames"] > 24:
+        raise ValueError("pack.text_motion.sparkle_frames must be <= 24")
+
     st = pack.get("sticker") or {}
     if not isinstance(st, dict):
         raise ValueError("pack.sticker must be a mapping")
+    cta_text = str(st.get("text") if st.get("text") is not None else "私信了解").strip()
+    if not cta_text:
+        cta_text = "私信了解"
+    if len(cta_text) > 8:
+        raise ValueError(
+            "pack.sticker.text should be short "
+            "(e.g. 私 / 私信 / 私信我 / 私信了解), max 8 chars"
+        )
+    st_enter = str(st.get("enter") or "slide_up").strip().lower()
+    if st_enter not in {"none", "pop", "slide_up"}:
+        raise ValueError("pack.sticker.enter must be none|pop|slide_up")
     pack["sticker"] = {
         "enabled": bool(st.get("enabled", True)),
-        "style": str(st.get("style") or "dm_emoji_bubble"),
-        "start": _number(st.get("start", 5.0), "pack.sticker.start", minimum=0),
+        "style": str(st.get("style") or "dm_estate_cta"),
+        "text": cta_text,
+        "start": _number(st.get("start", 4.5), "pack.sticker.start", minimum=0),
+        "duration": _number(st.get("duration", 2.5), "pack.sticker.duration", minimum=0.1),
+        "repeat_at_end": bool(st.get("repeat_at_end", True)),
+        "end_lead": _number(st.get("end_lead", 2.8), "pack.sticker.end_lead", minimum=0.1),
         "width_rel": _number(st.get("width_rel", 0.30), "pack.sticker.width_rel", minimum=0.05),
         "x": _number(st.get("x", 0.16), "pack.sticker.x", minimum=0),
         "y": _number(st.get("y", 0.90), "pack.sticker.y", minimum=0),
         "file": str(st.get("file") or "").strip(),
+        "enter": st_enter,
+        "enter_ms": int(
+            _number(st.get("enter_ms", 280), "pack.sticker.enter_ms", minimum=80)
+        ),
+        "fps": int(_number(st.get("fps", 12), "pack.sticker.fps", minimum=6)),
     }
+    if pack["sticker"]["enter_ms"] > 1500:
+        raise ValueError("pack.sticker.enter_ms must be <= 1500")
+    if pack["sticker"]["fps"] > 30:
+        raise ValueError("pack.sticker.fps must be <= 30")
     if pack["sticker"]["width_rel"] > 0.6:
         raise ValueError("pack.sticker.width_rel must be <= 0.6")
     if pack["sticker"]["x"] > 1 or pack["sticker"]["y"] > 1:
@@ -344,8 +471,8 @@ def _validate(cfg: dict[str, Any]) -> None:
     if not isinstance(audio, dict):
         raise ValueError("pack.audio must be a mapping")
     pack["audio"] = {
-        "bgm": str(audio.get("bgm") or "").strip(),
-        "volume": _number(audio.get("volume", 0.85), "pack.audio.volume", minimum=0),
+        "bgm": str(audio.get("bgm") or "pop_hook").strip() or "pop_hook",
+        "volume": _number(audio.get("volume", 0.80), "pack.audio.volume", minimum=0),
         "fade_in": _number(audio.get("fade_in", 0.5), "pack.audio.fade_in", minimum=0),
         "fade_out": _number(audio.get("fade_out", 0.8), "pack.audio.fade_out", minimum=0),
     }

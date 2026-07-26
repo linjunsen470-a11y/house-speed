@@ -1,10 +1,14 @@
 """
-Built-in short-video BGM presets (soft pure instrumentals).
+BGM presets for pack stage.
 
-Sources: Kevin MacLeod (incompetech.com) — Creative Commons BY 4.0.
-These are free alternatives in the same *mood* as popular Douyin lifestyle/
-real-estate BGMs. They are **not** the copyrighted chart hits themselves.
-Attribution is required when you publish (see assets/music/README.md).
+Mapped to files that currently exist under ``assets/music/``:
+
+1) **curated/** — short-video completion picks (``pop_*``)
+2) **shortlist/** — rhythmic shortlist ``01.mp3`` … ``12.mp3``
+3) **a*.m4a** — local library picks ``a1`` … ``a18`` (missing numbers skipped)
+
+Legacy CC BY Kevin MacLeod ids (``carefree`` etc.) still resolve if you re-run
+``scripts/fetch_bgm.py``; otherwise they alias to ``pop_hook`` when the mp3 is gone.
 """
 from __future__ import annotations
 
@@ -12,57 +16,163 @@ import random
 from pathlib import Path
 from typing import Any
 
-# id → file under assets/music/ + human label + vibe for picking
+# Prefer curated pop-style picks for 完播; ids go in pack.audio.bgm
 BGM_PRESETS: dict[str, dict[str, Any]] = {
+    # --- curated/ ---
+    "pop_hook": {
+        "file": "curated/bgm_pop_hook.mp3",
+        "label": "流行钩子短循环（完播首选）",
+        "vibe": "约27s 连续律动、前奏不空，适合20s成片循环",
+        "group": "curated",
+    },
+    "pop_spark": {
+        "file": "curated/bgm_pop_spark.mp3",
+        "label": "明亮轻快开场",
+        "vibe": "约20s 抓耳，适合前3秒留人",
+        "group": "curated",
+    },
+    "pop_vibe": {
+        "file": "curated/bgm_pop_vibe.mp3",
+        "label": "中长流行律动",
+        "vibe": "约69s 能量偏高、空间感好",
+        "group": "curated",
+    },
+    "pop_soft": {
+        "file": "curated/bgm_pop_soft.mp3",
+        "label": "柔和流行",
+        "vibe": "约27s 不抢画面，耐听",
+        "group": "curated",
+    },
+    "pop_drive": {
+        "file": "curated/bgm_pop_drive.mp3",
+        "label": "推进感",
+        "vibe": "约22s 适合快节奏带看",
+        "group": "curated",
+    },
+    "pop_clean": {
+        "file": "curated/bgm_pop_clean.mp3",
+        "label": "干净耐听",
+        "vibe": "约26s 循环友好",
+        "group": "curated",
+    },
+}
+
+# shortlist/01.mp3 … 12.mp3 → ids sl01 … sl12 (also accept "01", "shortlist/01")
+for _i in range(1, 13):
+    _n = f"{_i:02d}"
+    BGM_PRESETS[f"sl{_n}"] = {
+        "file": f"shortlist/{_n}.mp3",
+        "label": f"节奏短名单 {_n}",
+        "vibe": f"assets/music/shortlist/{_n}.mp3",
+        "group": "shortlist",
+    }
+
+# a1.m4a … a18.m4a (a10 may be absent on disk — resolve skips missing)
+for _i in range(1, 19):
+    BGM_PRESETS[f"a{_i}"] = {
+        "file": f"a{_i}.m4a",
+        "label": f"本地曲库 a{_i}",
+        "vibe": f"assets/music/a{_i}.m4a",
+        "group": "local",
+    }
+
+# Optional CC BY (only if fetch_bgm.py re-downloaded the files)
+_CC_BY: dict[str, dict[str, Any]] = {
     "carefree": {
         "file": "bgm_carefree.mp3",
         "label": "轻松明亮 · Carefree",
-        "vibe": "轻快不吵，看房/日常 vlog 默认推荐",
+        "vibe": "CC BY 备选（需 fetch_bgm.py）",
         "artist": "Kevin MacLeod",
         "license": "CC BY 4.0",
+        "group": "cc_by",
     },
     "easy_lemon": {
         "file": "bgm_easy_lemon.mp3",
         "label": "柔和俏皮 · Easy Lemon",
-        "vibe": "经典轻松纯音乐，短视频常用气质",
+        "vibe": "CC BY 备选（需 fetch_bgm.py）",
         "artist": "Kevin MacLeod",
         "license": "CC BY 4.0",
+        "group": "cc_by",
     },
     "life_of_riley": {
         "file": "bgm_life_of_riley.mp3",
         "label": "温暖愉快 · Life of Riley",
-        "vibe": "温馨有亲和力，改善盘/家庭向",
+        "vibe": "CC BY 备选（需 fetch_bgm.py）",
         "artist": "Kevin MacLeod",
         "license": "CC BY 4.0",
+        "group": "cc_by",
     },
     "summer_day": {
         "file": "bgm_summer_day.mp3",
         "label": "夏日通透 · Summer Day",
-        "vibe": "明亮开阔，采光/江景/新盘",
+        "vibe": "CC BY 备选（需 fetch_bgm.py）",
         "artist": "Kevin MacLeod",
         "license": "CC BY 4.0",
+        "group": "cc_by",
     },
     "dreamlike": {
         "file": "bgm_dreamlike.mp3",
         "label": "柔和梦幻 · Dreamlike",
-        "vibe": "不突兀、有氛围，易听完",
+        "vibe": "CC BY 备选（需 fetch_bgm.py）",
         "artist": "Kevin MacLeod",
         "license": "CC BY 4.0",
+        "group": "cc_by",
     },
     "bittersweet": {
         "file": "bgm_bittersweet.mp3",
         "label": "轻情绪 · Bittersweet",
-        "vibe": "略带情绪，适合「忍痛挂牌」叙事",
+        "vibe": "CC BY 备选（需 fetch_bgm.py）",
         "artist": "Kevin MacLeod",
         "license": "CC BY 4.0",
+        "group": "cc_by",
     },
 }
+BGM_PRESETS.update(_CC_BY)
 
-DEFAULT_BGM = "carefree"
+# Old configs used carefree as default; prefer curated when CC BY files are gone
+DEFAULT_BGM = "pop_hook"
+LEGACY_ALIASES: dict[str, str] = {
+    "carefree": "pop_hook",
+    "easy_lemon": "pop_soft",
+    "life_of_riley": "pop_vibe",
+    "summer_day": "pop_spark",
+    "dreamlike": "pop_soft",
+    "bittersweet": "pop_clean",
+}
+
+CURATED_IDS = [k for k, v in BGM_PRESETS.items() if v.get("group") == "curated"]
+SHORTLIST_IDS = [k for k, v in BGM_PRESETS.items() if v.get("group") == "shortlist"]
+LOCAL_IDS = [k for k, v in BGM_PRESETS.items() if v.get("group") == "local"]
 
 
 def list_bgm_ids() -> list[str]:
     return list(BGM_PRESETS.keys())
+
+
+def list_bgm_ids_present(assets: Path) -> list[str]:
+    """Preset ids whose files exist on disk."""
+    music_dir = Path(assets) / "music"
+    out: list[str] = []
+    for key, meta in BGM_PRESETS.items():
+        if (music_dir / meta["file"]).is_file():
+            out.append(key)
+    return out
+
+
+def _resolve_preset_file(key: str, music_dir: Path) -> Path | None:
+    meta = BGM_PRESETS.get(key)
+    if not meta:
+        return None
+    path = music_dir / meta["file"]
+    if path.is_file():
+        return path.resolve()
+    # legacy alias when CC BY file was deleted
+    alt = LEGACY_ALIASES.get(key)
+    if alt and alt in BGM_PRESETS:
+        alt_path = music_dir / BGM_PRESETS[alt]["file"]
+        if alt_path.is_file():
+            return alt_path.resolve()
+    return None
 
 
 def resolve_bgm_path(
@@ -75,58 +185,82 @@ def resolve_bgm_path(
     Resolve pack.audio.bgm to a local file.
 
     Accepts:
-      - preset id: carefree / easy_lemon / ...
-      - random / random_soft: pick a built-in preset
-      - filename under assets/music/
+      - preset id: pop_hook / sl01 / a3 / carefree (if present or aliased)
+      - random / random_soft / auto / random_pop: curated first, else any present
+      - shortlist/01.mp3 or 01.mp3 under shortlist/
+      - filename under assets/music/ (incl. curated/)
       - absolute or relative path
     """
     raw = str(bgm or "").strip()
     if not raw:
         raise ValueError("pack.audio.bgm is empty")
 
-    key = raw.lower().replace("\\", "/").split("/")[-1]
+    music_dir = Path(assets) / "music"
+    raw_norm = raw.replace("\\", "/")
+    key = raw_norm.split("/")[-1]
     key_stem = Path(key).stem
-    # strip optional bgm_ prefix / .mp3
     for prefix in ("bgm_",):
         if key_stem.startswith(prefix):
             key_stem = key_stem[len(prefix) :]
 
-    music_dir = Path(assets) / "music"
-
-    if key in ("random", "random_soft", "auto"):
+    if key in ("random", "random_soft", "auto", "random_pop"):
         r = rng or random.Random()
-        pick = r.choice(list(BGM_PRESETS.keys()))
-        path = music_dir / BGM_PRESETS[pick]["file"]
-        if not path.is_file():
+        present = list_bgm_ids_present(assets)
+        curated = [i for i in CURATED_IDS if i in present]
+        pool = curated or present
+        if not pool:
             raise FileNotFoundError(
-                f"BGM preset {pick!r} file missing: {path}. "
-                "Run: python scripts/bootstrap_assets.py"
+                "No BGM files found under assets/music "
+                "(expected curated/*.mp3, shortlist/*.mp3, or a*.m4a)"
             )
-        return path.resolve()
+        pick = r.choice(pool)
+        return (music_dir / BGM_PRESETS[pick]["file"]).resolve()
 
+    # shortlist number: "01", "1", "sl01", "shortlist/01"
+    short_n: str | None = None
+    if key_stem.isdigit() and 1 <= int(key_stem) <= 12:
+        short_n = f"{int(key_stem):02d}"
+    elif key_stem.startswith("sl") and key_stem[2:].isdigit():
+        short_n = f"{int(key_stem[2:]):02d}"
+    if short_n:
+        for c in (
+            music_dir / "shortlist" / f"{short_n}.mp3",
+            music_dir / f"{short_n}.mp3",
+        ):
+            if c.is_file():
+                return c.resolve()
+        # fall through to preset slXX if registered
+
+    # preset id
     if key_stem in BGM_PRESETS:
-        path = music_dir / BGM_PRESETS[key_stem]["file"]
-        if path.is_file():
-            return path.resolve()
+        found = _resolve_preset_file(key_stem, music_dir)
+        if found is not None:
+            return found
         raise FileNotFoundError(
-            f"BGM preset {key_stem!r} file missing: {path}. "
-            "Run: python scripts/bootstrap_assets.py"
+            f"BGM preset {key_stem!r} file missing: "
+            f"{music_dir / BGM_PRESETS[key_stem]['file']}"
         )
 
-    # Direct path / filename
+    # aN style already covered by presets; path candidates
     candidates = [
         Path(raw),
-        music_dir / raw,
+        music_dir / raw_norm,
         music_dir / Path(raw).name,
+        music_dir / "curated" / Path(raw).name,
+        music_dir / "shortlist" / Path(raw).name,
         music_dir / f"bgm_{key_stem}.mp3",
         music_dir / f"{key_stem}.mp3",
+        music_dir / f"{key_stem}.m4a",
+        music_dir / "curated" / f"bgm_{key_stem}.mp3",
+        music_dir / "curated" / f"{key_stem}.mp3",
+        music_dir / "shortlist" / f"{key_stem}.mp3",
     ]
     for c in candidates:
         if c.is_file():
             return c.resolve()
 
-    known = ", ".join(list_bgm_ids())
+    present = list_bgm_ids_present(assets)
+    known = ", ".join(present[:24]) + ("…" if len(present) > 24 else "")
     raise FileNotFoundError(
-        f"BGM not found: {bgm!r}. "
-        f"Use a path, or preset id: {known}, or 'random'"
+        f"BGM not found: {bgm!r}. Use a path, or preset id among: {known}, or 'random'"
     )

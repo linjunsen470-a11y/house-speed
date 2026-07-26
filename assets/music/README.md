@@ -1,60 +1,73 @@
-# 成片 BGM（短视频纯音乐）
+# 成片 BGM
 
-## 说明
+当前目录里实际保留的曲库，与 `walkthrough_edit/music_catalog.py` 一一对应。
 
-抖音/快手等平台上的「热门原曲」受版权保护，**不能**合法批量下载到仓库。  
-本目录提供 **6 首气质相近的免版税纯音乐**（轻、不突兀、适合看房成片），来源：
+## 1. 完播精选 `curated/`（默认）
 
-| id | 文件 | 气质 | 原曲名 | 作者 |
-|----|------|------|--------|------|
-| `carefree` | `bgm_carefree.mp3` | 轻松明亮（默认） | Carefree | Kevin MacLeod |
-| `easy_lemon` | `bgm_easy_lemon.mp3` | 柔和俏皮 | Easy Lemon | Kevin MacLeod |
-| `life_of_riley` | `bgm_life_of_riley.mp3` | 温暖愉快 | Life of Riley | Kevin MacLeod |
-| `summer_day` | `bgm_summer_day.mp3` | 夏日通透 | Summer Day | Kevin MacLeod |
-| `dreamlike` | `bgm_dreamlike.mp3` | 柔和梦幻 | Dreamlike | Kevin MacLeod |
-| `bittersweet` | `bgm_bittersweet.mp3` | 轻情绪叙事 | Bittersweet | Kevin MacLeod |
-
-- 作者站点：https://incompetech.com/  
-- 许可：**Creative Commons Attribution 4.0 (CC BY 4.0)**  
-- 发布视频时请在简介/评论区保留署名，例如：  
-  `BGM: Carefree by Kevin MacLeod (incompetech.com) · CC BY`
-
-已做 loudnorm 响度对齐，成片里更稳。
-
-## 配置用法
-
-`1.edit.yaml` / `config.yaml`：
+| 配置 id | 文件 | 用途 |
+|---------|------|------|
+| **`pop_hook`** | `curated/bgm_pop_hook.mp3` | **默认** · 钩子短循环 |
+| `pop_spark` | `curated/bgm_pop_spark.mp3` | 明亮抓耳 |
+| `pop_vibe` | `curated/bgm_pop_vibe.mp3` | 中长律动 |
+| `pop_soft` | `curated/bgm_pop_soft.mp3` | 柔和 |
+| `pop_drive` | `curated/bgm_pop_drive.mp3` | 推进 |
+| `pop_clean` | `curated/bgm_pop_clean.mp3` | 干净耐听 |
 
 ```yaml
 audio:
-  bgm: "carefree"          # 预设 id
-  # bgm: "easy_lemon"
-  # bgm: "random"          # 每次随机一首内置
-  # bgm: "assets/music/bgm_summer_day.mp3"  # 或自备路径
+  bgm: "pop_hook"
   volume: 0.80
-  fade_in: 0.5
-  fade_out: 0.8
 ```
 
-列出全部：
+## 2. 节奏短名单 `shortlist/`
+
+| 配置 id | 文件 |
+|---------|------|
+| `sl01` … `sl12` | `shortlist/01.mp3` … `12.mp3` |
+
+也支持路径：`shortlist/01.mp3` 或 `01`。
+
+## 3. 本地曲库 `a*.m4a`
+
+| 配置 id | 文件 |
+|---------|------|
+| `a1` … `a9`, `a11` … `a18` | 同名 `.m4a`（缺号自动跳过） |
+
+## 4. 随机
+
+```yaml
+audio:
+  bgm: "random"   # 优先 curated，否则 shortlist / a*
+```
+
+## 5. 可选 CC BY（Kevin MacLeod）
+
+若需要可再下载（**当前默认曲库已不含这些文件**）：
+
+```bash
+python scripts/fetch_bgm.py
+```
+
+下载后可用 id：`carefree` / `easy_lemon` / `life_of_riley` / `summer_day` / `dreamlike` / `bittersweet`。  
+若未下载却仍写 `carefree`，代码会**回退**到 `pop_hook`。
+
+许可（下载后发布需署名）：`BGM: … by Kevin MacLeod (incompetech.com) · CC BY`
+
+## 列出全部
 
 ```bash
 python edit_speed.py --list-styles
 ```
 
-## 重新下载
-
-```bash
-python scripts/bootstrap_assets.py
-# 或只拉音乐：
-python scripts/fetch_bgm.py
-```
-
-## 自备「真·抖音热门」
-
-若你有平台授权或自己购买的曲库文件，放到本目录后：
+## 自备文件
 
 ```yaml
 audio:
   bgm: "assets/music/your_track.mp3"
 ```
+
+## 仓库与体积
+
+- `assets/music/**` 音频默认 **gitignore**（仅保留本 README 与子目录说明）。
+- 本地自备 `curated/`、`shortlist/`、`a*.m4a` 即可；列表与是否在盘上：`python edit_speed.py --list-styles`（缺文件标 `!`）。
+- 可选维护脚本（个人自用，非流水线必需）：`scripts/audit_bgm.py`、`select_rhythmic_bgm.py`、`rank_bgm_top.py`、`export_shortlist.py`。

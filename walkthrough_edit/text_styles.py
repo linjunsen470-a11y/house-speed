@@ -48,7 +48,73 @@ def _style(
     }
 
 
+# Estate uses two families only:
+#   A accent  — title (red-orange) + price (warmer gold-orange variant)
+#   B secondary — highlights
+_ESTATE_ACCENT: dict[str, Any] = {
+    "fill": (255, 45, 35, 255),
+    "fill_bottom": (255, 125, 25, 255),
+    "stroke_outer": (18, 78, 175, 255),
+    "stroke_inner": (255, 255, 255, 255),
+    "stroke_outer_rel": 0.120,
+    "stroke_inner_rel": 0.052,
+    "glow": (20, 82, 175, 100),
+    "glow_rel": 0.022,
+}
+# Price = same family as title, but warmer / larger / with twinkling stars
+_ESTATE_ACCENT_PRICE: dict[str, Any] = {
+    "fill": (255, 95, 40, 255),
+    "fill_bottom": (255, 175, 45, 255),
+    "stroke_outer": (22, 70, 165, 255),
+    "stroke_inner": (255, 255, 255, 255),
+    "stroke_outer_rel": 0.128,
+    "stroke_inner_rel": 0.056,
+    "glow": (255, 140, 40, 90),
+    "glow_rel": 0.020,
+    "sparkle": True,
+    "underline": False,
+}
+_ESTATE_SECONDARY: dict[str, Any] = {
+    "fill": (255, 255, 255, 255),
+    "fill_bottom": None,
+    "stroke_outer": (18, 50, 100, 250),
+    "stroke_inner": (255, 195, 50, 255),
+    "stroke_outer_rel": 0.112,
+    "stroke_inner_rel": 0.038,
+    "glow": (255, 200, 60, 50),
+    "glow_rel": 0.012,
+}
+
+
 STYLES: dict[str, dict[str, Any]] = {
+    "douyin_estate": {
+        "label": "Estate: accent title/price + secondary highlights",
+        "kind": "estate",
+        "y_center_rel": 0.255,
+        "max_width_rel": 0.88,
+        "safe_margin_rel": 0.06,
+        "line_gap_rel": 0.008,
+        "letter_spacing_rel": 0.0,
+        "sparkle": False,
+        "highlights_mode": "join",  # join | stack — layout may override
+        "roles": {
+            # Style A — title
+            "title": {
+                "font_size_rel": 0.088,
+                **_ESTATE_ACCENT,
+            },
+            # Style B — selling points
+            "highlights": {
+                "font_size_rel": 0.064,
+                **_ESTATE_SECONDARY,
+            },
+            # Style A′ — same family as title, warmer + ornaments
+            "price": {
+                "font_size_rel": 0.102,
+                **_ESTATE_ACCENT_PRICE,
+            },
+        },
+    },
     "douyin_pink": _style(
         label="粉字白描边发光（参考甜宠盘）",
         fill=(255, 90, 170, 255),
@@ -131,7 +197,7 @@ STYLES["lemon"] = STYLES["douyin_lemon"]
 STYLES["mint"] = STYLES["douyin_mint"]
 STYLES["gold"] = STYLES["douyin_gold"]
 
-DEFAULT_STYLE = "douyin_fire"
+DEFAULT_STYLE = "douyin_estate"
 
 
 def list_styles() -> list[str]:

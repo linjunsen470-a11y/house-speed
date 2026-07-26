@@ -187,6 +187,8 @@ def atempo_chain(speed: float) -> str:
 
 
 def build_filter(segs: list[dict], has_audio: bool) -> str:
+    if not segs:
+        raise ValueError("build_filter requires at least one segment")
     parts: list[str] = []
     concat_in: list[str] = []
     for i, s in enumerate(segs):
@@ -226,6 +228,8 @@ def build_review_filter(
     fontfile: str | None = None,
 ) -> str:
     """Build a low-resolution filter with source ranges and decisions burned in."""
+    if not segs:
+        raise ValueError("build_review_filter requires at least one segment")
     parts: list[str] = []
     concat_in: list[str] = []
     for i, seg in enumerate(segs):
@@ -516,6 +520,8 @@ def _run_ffmpeg_atomic(
     ]
 
     last_percent = -10
+    process: subprocess.Popen[str] | None = None
+    succeeded = False
     try:
         with open(log_path, "w", encoding="utf-8", errors="replace") as log_file:
             process = subprocess.Popen(
@@ -547,13 +553,18 @@ def _run_ffmpeg_atomic(
         if duration <= 0:
             raise RuntimeError("FFmpeg produced an unreadable or empty output")
         _replace_with_retry(temporary, output_path)
+        succeeded = True
         return duration
-    except Exception:
-        try:
-            temporary.unlink(missing_ok=True)
-        except PermissionError:
-            pass
-        raise
+    finally:
+        # Ctrl+C / crash: stop orphan ffmpeg and drop incomplete .part files.
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait()
+        if not succeeded:
+            try:
+                temporary.unlink(missing_ok=True)
+            except PermissionError:
+                pass
 
 
 def export_video(

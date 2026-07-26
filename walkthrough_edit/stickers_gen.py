@@ -11,7 +11,7 @@ import subprocess
 import urllib.request
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageSequence
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageSequence
 
 
 # Google Noto Animated Emoji (Apache-2.0) — transparent GIF loops
@@ -69,51 +69,287 @@ STICKER_SPECS: dict[str, dict] = {
         }
         for sid, meta in EXTERNAL_SOURCES.items()
     },
-    "dm_follow_me": {
-        "label": "青气泡 + 粉字私信我（程序绘制）",
-        "kind": "bubble_pink",
+    # --- Locked family: 花字一体式 CTA（用户确认 v7 观感后锁定）---------------
+    # 结构统一：多层花字 + 小 Noto 点缀 GIF，不叠大号气泡/独立胶囊。
+    "dm_estate_cta": {
+        "label": "【锁定默认】暖橙花字 + 星光",
+        "kind": "estate_gif_cta",
+        "theme": "warm",
+        "sparkle_id": "2728",
         "width_rel": 0.30,
-        "x": 0.18,
+        "x": 0.16,
         "y": 0.90,
+        "text": "私信了解",
+        "locked": True,
+    },
+    "dm_estate_cta_gold": {
+        "label": "金奢花字 + 星光",
+        "kind": "estate_gif_cta",
+        "theme": "gold",
+        "sparkle_id": "2728",
+        "width_rel": 0.30,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信了解",
+    },
+    "dm_estate_cta_sky": {
+        "label": "晴空蓝花字 + 星光",
+        "kind": "estate_gif_cta",
+        "theme": "sky",
+        "sparkle_id": "2728",
+        "width_rel": 0.30,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信了解",
+    },
+    "dm_estate_cta_mint": {
+        "label": "薄荷花字 + 星光",
+        "kind": "estate_gif_cta",
+        "theme": "mint",
+        "sparkle_id": "2728",
+        "width_rel": 0.30,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信了解",
+    },
+    "dm_estate_cta_violet": {
+        "label": "紫霓花字 + 星光",
+        "kind": "estate_gif_cta",
+        "theme": "violet",
+        "sparkle_id": "2728",
+        "width_rel": 0.30,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信了解",
+    },
+    "dm_estate_cta_snow": {
+        "label": "冰雪白花字 + 金环 + 星光（加对比）",
+        "kind": "estate_gif_cta",
+        "theme": "snow",
+        "sparkle_id": "2728",
+        "width_rel": 0.30,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信了解",
+    },
+    "dm_estate_cta_heart": {
+        "label": "暖粉花字 + 爱心点缀",
+        "kind": "estate_gif_cta",
+        "theme": "rose",
+        "sparkle_id": "2764_fe0f",
+        "width_rel": 0.30,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信了解",
+    },
+    "dm_estate_cta_fire": {
+        "label": "炽红花字 + 星光（强钩子）",
+        "kind": "estate_gif_cta",
+        "theme": "fire",
+        "sparkle_id": "2728",
+        "width_rel": 0.30,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信了解",
+    },
+    "dm_estate_cta_ink": {
+        "label": "墨黑花字 + 金环（高级感）",
+        "kind": "estate_gif_cta",
+        "theme": "ink",
+        "sparkle_id": "2728",
+        "width_rel": 0.30,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信了解",
+    },
+    "dm_estate_cta_lemon": {
+        "label": "柠檬黄花字 + 红描边",
+        "kind": "estate_gif_cta",
+        "theme": "lemon",
+        "sparkle_id": "2728",
+        "width_rel": 0.30,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信了解",
+    },
+    "dm_estate_cta_neon": {
+        "label": "霓虹青花字 + 星光",
+        "kind": "estate_gif_cta",
+        "theme": "neon",
+        "sparkle_id": "2728",
+        "width_rel": 0.30,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信了解",
+    },
+    "dm_estate_cta_bubble": {
+        "label": "气泡主视觉（备选）",
+        "kind": "estate_gif_cta",
+        "emoji_id": "1f4ac",
+        "sparkle_id": "2728",
+        "layout": "bubble",
+        "theme": "warm",
+        "width_rel": 0.34,
+        "x": 0.17,
+        "y": 0.88,
+        "text": "私信了解",
+    },
+    # 原「磨砂暗胶囊」改为更亮的软胶囊，仍无网络依赖
+    "dm_estate_cta_plain": {
+        "label": "软珊瑚胶囊（无网络，重做）",
+        "kind": "estate_cta",
+        "width_rel": 0.28,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信了解",
+    },
+    # 以下原「稀疏/程序弱款」全部升为花字一体式（保留旧 id 兼容）
+    "dm_follow_me": {
+        "label": "青字私信我 + 星光（原青气泡重做）",
+        "kind": "estate_gif_cta",
+        "theme": "sky",
+        "sparkle_id": "2728",
+        "width_rel": 0.28,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信我",
     },
     "dm_pink_wave": {
-        "label": "纯粉描边私信我",
-        "kind": "text_pink",
-        "width_rel": 0.30,
-        "x": 0.84,
+        "label": "粉字私信我 + 星光（原粉描边重做）",
+        "kind": "estate_gif_cta",
+        "theme": "rose",
+        "sparkle_id": "2728",
+        "width_rel": 0.28,
+        "x": 0.16,
         "y": 0.90,
+        "text": "私信我",
     },
     "dm_chat_pop": {
-        "label": "粉胶囊弹跳私信我",
-        "kind": "pill_pop",
-        "width_rel": 0.30,
-        "x": 0.84,
-        "y": 0.88,
+        "label": "粉字私信我 + 爱心（原粉胶囊重做）",
+        "kind": "estate_gif_cta",
+        "theme": "rose",
+        "sparkle_id": "2764_fe0f",
+        "width_rel": 0.28,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信我",
     },
     "dm_heart_tap": {
-        "label": "心形点缀私信",
-        "kind": "heart_text",
-        "width_rel": 0.28,
-        "x": 0.84,
-        "y": 0.88,
+        "label": "暖粉短字「私信」+ 爱心",
+        "kind": "estate_gif_cta",
+        "theme": "rose",
+        "sparkle_id": "2764_fe0f",
+        "width_rel": 0.24,
+        "x": 0.14,
+        "y": 0.90,
+        "text": "私信",
     },
     "dm_bell_cute": {
-        "label": "铃铛点缀私信我",
-        "kind": "bell_text",
+        "label": "金字私信我 + 星光（原铃铛重做）",
+        "kind": "estate_gif_cta",
+        "theme": "gold",
+        "sparkle_id": "2728",
         "width_rel": 0.28,
-        "x": 0.86,
-        "y": 0.88,
+        "x": 0.16,
+        "y": 0.90,
+        "text": "私信我",
     },
     "dm_hand_cute": {
-        "label": "点击点缀戳我私信",
-        "kind": "tap_text",
-        "width_rel": 0.30,
-        "x": 0.86,
+        "label": "炽红「戳我私信」+ 星光（原点击重做）",
+        "kind": "estate_gif_cta",
+        "theme": "fire",
+        "sparkle_id": "2728",
+        "width_rel": 0.32,
+        "x": 0.17,
         "y": 0.90,
+        "text": "戳我私信",
     },
 }
 
-DEFAULT_STICKER = "dm_emoji_bubble"
+DEFAULT_STICKER = "dm_estate_cta"
+
+# 花字 CTA 配色主题（fill / outer / mid / glow）
+HUAZI_THEMES: dict[str, dict[str, tuple[int, int, int, int]]] = {
+    # Locked default — do not change casually
+    "warm": {
+        "fill": (255, 75, 55, 255),
+        "outer": (22, 48, 110, 255),
+        "mid": (255, 255, 255, 255),
+        "glow": (255, 120, 40, 120),
+        "glow_stroke": (255, 100, 30, 100),
+    },
+    "gold": {
+        "fill": (255, 210, 70, 255),
+        "outer": (90, 50, 10, 255),
+        "mid": (255, 250, 230, 255),
+        "glow": (255, 190, 60, 110),
+        "glow_stroke": (220, 150, 30, 90),
+    },
+    "sky": {
+        "fill": (70, 170, 255, 255),
+        "outer": (18, 55, 130, 255),
+        "mid": (255, 255, 255, 255),
+        "glow": (80, 160, 255, 100),
+        "glow_stroke": (40, 120, 220, 90),
+    },
+    "mint": {
+        "fill": (70, 230, 190, 255),
+        "outer": (15, 90, 80, 255),
+        "mid": (255, 255, 255, 255),
+        "glow": (60, 220, 180, 100),
+        "glow_stroke": (30, 180, 150, 90),
+    },
+    "violet": {
+        "fill": (190, 110, 255, 255),
+        "outer": (70, 30, 130, 255),
+        "mid": (255, 255, 255, 255),
+        "glow": (180, 100, 255, 110),
+        "glow_stroke": (140, 60, 220, 90),
+    },
+    # snow: ice cream white — thicker dark outer so it doesn't wash out on light walls
+    "snow": {
+        "fill": (255, 252, 248, 255),
+        "outer": (18, 28, 55, 255),
+        "mid": (255, 200, 90, 255),  # gold mid ring for punch
+        "glow": (255, 220, 140, 100),
+        "glow_stroke": (40, 60, 100, 90),
+    },
+    "rose": {
+        "fill": (255, 95, 150, 255),
+        "outer": (130, 25, 70, 255),
+        "mid": (255, 255, 255, 255),
+        "glow": (255, 120, 170, 110),
+        "glow_stroke": (230, 70, 120, 90),
+    },
+    "fire": {
+        "fill": (255, 45, 40, 255),
+        "outer": (20, 70, 160, 255),
+        "mid": (255, 255, 255, 255),
+        "glow": (255, 80, 30, 120),
+        "glow_stroke": (255, 50, 20, 100),
+    },
+    "ink": {
+        "fill": (30, 34, 48, 255),
+        "outer": (255, 255, 255, 255),
+        "mid": (255, 210, 80, 255),
+        "glow": (20, 25, 40, 100),
+        "glow_stroke": (0, 0, 0, 80),
+    },
+    "lemon": {
+        "fill": (255, 235, 70, 255),
+        "outer": (180, 40, 50, 255),
+        "mid": (255, 255, 255, 255),
+        "glow": (255, 220, 60, 110),
+        "glow_stroke": (220, 80, 40, 90),
+    },
+    "neon": {
+        "fill": (60, 255, 220, 255),
+        "outer": (20, 30, 80, 255),
+        "mid": (255, 255, 255, 255),
+        "glow": (40, 240, 200, 120),
+        "glow_stroke": (0, 200, 180, 100),
+    },
+}
 
 
 def _font(size: int) -> ImageFont.ImageFont:
@@ -375,7 +611,87 @@ def _render_tap_text(size: int, t: float) -> Image.Image:
     return img
 
 
-def _render_frame(kind: str, size: int, t: float) -> Image.Image:
+def _render_estate_cta(size: int, t: float, text: str = "私信了解") -> Image.Image:
+    """
+    Soft coral capsule CTA (offline, no GIF).
+
+    Bright short-video language: coral→orange fill, thick white ring,
+    clean white type, gentle bob + sheen — not dark frosted glass.
+    """
+    label = (text or "私信了解").strip() or "私信了解"
+    n = max(1, len(label))
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+
+    bob = int(round(size * 0.01 * math.sin(t * 2 * math.pi)))
+    width_rel = 0.56 if n <= 1 else (0.68 if n <= 2 else (0.80 if n <= 3 else 0.90))
+    pill_w = int(size * width_rel)
+    pill_h = int(size * 0.22)
+    cx, cy = size // 2, size // 2 + bob
+    x0, y0 = cx - pill_w // 2, cy - pill_h // 2
+    x1, y1 = cx + pill_w // 2, cy + pill_h // 2
+    radius = pill_h // 2
+
+    # Soft warm shadow
+    shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle(
+        (x0 + 2, y0 + 5, x1 + 2, y1 + 8),
+        radius=radius,
+        fill=(120, 30, 40, 90),
+    )
+    img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(radius=max(5, size // 50))))
+
+    # Coral body
+    body = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    bd = ImageDraw.Draw(body)
+    bd.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=(255, 72, 88, 250))
+    # Soft vertical depth (lighter top)
+    hi = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(hi).rounded_rectangle(
+        (x0 + 2, y0 + 2, x1 - 2, y0 + pill_h // 2),
+        radius=max(2, radius - 2),
+        fill=(255, 255, 255, 55),
+    )
+    body.alpha_composite(hi.filter(ImageFilter.GaussianBlur(radius=max(2, pill_h // 8))))
+    # Thick white ring
+    ImageDraw.Draw(body).rounded_rectangle(
+        (x0, y0, x1, y1),
+        radius=radius,
+        outline=(255, 255, 255, 255),
+        width=max(4, size // 70),
+    )
+    # Sheen sweep
+    sheen_x = x0 + int((pill_w + pill_h) * ((t + 0.2) % 1.0)) - pill_h // 2
+    sheen = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    sd = ImageDraw.Draw(sheen)
+    band = max(8, pill_w // 6)
+    for i, a in enumerate((0, 35, 70, 35, 0)):
+        xx = sheen_x + i * (band // 4)
+        sd.rectangle((xx, y0 + 3, xx + band // 4, y1 - 3), fill=(255, 255, 255, a))
+    mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=255)
+    sheen.putalpha(ImageChops.multiply(sheen.split()[-1], mask))
+    body.alpha_composite(sheen.filter(ImageFilter.GaussianBlur(radius=max(2, size // 80))))
+    img.alpha_composite(body)
+
+    font_rel = 0.125 if n <= 1 else (0.112 if n <= 2 else (0.100 if n <= 3 else 0.090))
+    font = _font(max(34, int(size * font_rel)))
+    draw = ImageDraw.Draw(img)
+    bbox = draw.textbbox((0, 0), label, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    tx = cx - tw // 2
+    ty = cy - th // 2 - max(1, size // 220)
+    draw.text(
+        (tx, ty), label, font=font,
+        fill=(255, 255, 255, 255),
+        stroke_width=max(2, size // 140),
+        stroke_fill=(160, 30, 45, 220),
+    )
+    return img
+
+
+def _render_frame(kind: str, size: int, t: float, text: str | None = None) -> Image.Image:
+    if kind == "estate_cta":
+        return _render_estate_cta(size, t, text=text or "私信了解")
     if kind == "bubble_pink":
         return _render_bubble_pink(size, t)
     if kind == "text_pink":
@@ -527,6 +843,148 @@ def _composite_emoji_badge(
     return canvas
 
 
+def _subsample_frames(frames: list[Image.Image], target_n: int) -> list[Image.Image]:
+    if len(frames) <= target_n:
+        return frames
+    step = len(frames) / target_n
+    return [frames[int(i * step)] for i in range(target_n)]
+
+
+def _draw_huazi_cta_line(
+    canvas: Image.Image,
+    label: str,
+    center: tuple[int, int],
+    font: ImageFont.ImageFont,
+    *,
+    size: int,
+    theme: str = "warm",
+) -> tuple[int, int, int, int]:
+    """
+    One-line short-video 花字 for CTA — outer → mid → fill.
+    Returns ink bbox (x0,y0,x1,y1) for sparkle placement.
+    """
+    pal = HUAZI_THEMES.get(theme) or HUAZI_THEMES["warm"]
+    draw = ImageDraw.Draw(canvas)
+    outer_w = max(5, size // 28)
+    mid_w = max(3, size // 48)
+    bbox = draw.textbbox((0, 0), label, font=font, stroke_width=outer_w)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    x = center[0] - tw // 2
+    y = center[1] - th // 2
+
+    glow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.text(
+        (x, y),
+        label,
+        font=font,
+        fill=pal["glow"],
+        stroke_width=outer_w + 4,
+        stroke_fill=pal["glow_stroke"],
+    )
+    canvas.alpha_composite(
+        glow.filter(ImageFilter.GaussianBlur(radius=max(3, size // 60)))
+    )
+
+    draw = ImageDraw.Draw(canvas)
+    draw.text(
+        (x, y),
+        label,
+        font=font,
+        fill=pal["outer"],
+        stroke_width=outer_w,
+        stroke_fill=pal["outer"],
+    )
+    draw.text(
+        (x, y),
+        label,
+        font=font,
+        fill=pal["mid"],
+        stroke_width=mid_w,
+        stroke_fill=pal["mid"],
+    )
+    draw.text((x, y), label, font=font, fill=pal["fill"])
+    return (x - outer_w, y - outer_w, x + tw + outer_w, y + th + outer_w)
+
+
+def _composite_estate_gif_cta(
+    emoji_frames: list[Image.Image] | None,
+    sparkle_frames: list[Image.Image] | None,
+    text: str,
+    size: int,
+    frame_i: int,
+    *,
+    layout: str = "huazi",
+    theme: str = "warm",
+) -> Image.Image:
+    """
+    Default ``huazi`` layout: bold 花字 CTA + small Noto sparkles only.
+
+    Optional ``bubble`` layout keeps large emoji + label for alternate style.
+    """
+    label = (text or "私信了解").strip() or "私信了解"
+    n = max(1, len(label))
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    n_frames = max(
+        12,
+        len(sparkle_frames or []) or 0,
+        len(emoji_frames or []) or 0,
+    )
+    t = frame_i / max(1, n_frames)
+    bob = int(size * 0.012 * math.sin(t * 2 * math.pi))
+
+    if layout == "bubble" and emoji_frames:
+        # Alternate: compact emoji above 花字
+        em = emoji_frames[frame_i % len(emoji_frames)]
+        emoji_h = int(size * 0.36)
+        em_r = em.resize((emoji_h, emoji_h), Image.Resampling.LANCZOS)
+        ex = (size - emoji_h) // 2
+        ey = int(size * 0.06) + bob
+        glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        ImageDraw.Draw(glow).ellipse(
+            (ex, ey + emoji_h // 4, ex + emoji_h, ey + emoji_h),
+            fill=(255, 100, 80, 50),
+        )
+        canvas.alpha_composite(
+            glow.filter(ImageFilter.GaussianBlur(radius=max(6, size // 35)))
+        )
+        canvas.alpha_composite(em_r, dest=(ex, ey))
+        text_cy = ey + emoji_h + int(size * 0.06)
+    else:
+        text_cy = size // 2 + bob
+
+    font_rel = 0.168 if n <= 2 else (0.148 if n <= 3 else 0.128)
+    font = _font(max(40, int(size * font_rel)))
+    ink = _draw_huazi_cta_line(
+        canvas, label, (size // 2, text_cy), font, size=size, theme=theme
+    )
+
+    # Noto sparkles as accents only — hug the text bbox, not a second hero
+    if sparkle_frames:
+        sp = sparkle_frames[frame_i % len(sparkle_frames)]
+        ix0, iy0, ix1, iy1 = ink
+        iw, ih = max(1, ix1 - ix0), max(1, iy1 - iy0)
+        anchors = (
+            (ix1 - iw * 0.05, iy0 - ih * 0.15, 0.20, 0.0),
+            (ix0 - iw * 0.08, iy0 + ih * 0.1, 0.15, 0.35),
+            (ix1 - iw * 0.02, iy1 - ih * 0.25, 0.14, 0.7),
+        )
+        for ax, ay, sc, phase in anchors:
+            twinkle = 0.45 + 0.55 * (
+                0.5 + 0.5 * math.sin(t * 2 * math.pi + phase * 6.28)
+            )
+            sh_sz = max(16, int(size * sc * (0.8 + 0.25 * twinkle)))
+            sp_r = sp.resize((sh_sz, sh_sz), Image.Resampling.LANCZOS)
+            r, g, b, a = sp_r.split()
+            a = a.point(lambda p, tw=twinkle: int(p * tw))
+            sp_r = Image.merge("RGBA", (r, g, b, a))
+            dx = int(ax - sh_sz / 2)
+            dy = int(ay - sh_sz / 2) + bob // 2
+            canvas.alpha_composite(sp_r, dest=(dx, dy))
+
+    return canvas
+
+
 def generate_emoji_sticker_apng(
     style_id: str,
     out_path: Path,
@@ -543,9 +1001,7 @@ def generate_emoji_sticker_apng(
     emoji_frames = _load_gif_rgba_frames(gif_path, max_frames=36)
     # subsample to ~1.2s loop at fps
     target_n = max(12, int(fps * 1.2))
-    if len(emoji_frames) > target_n:
-        step = len(emoji_frames) / target_n
-        emoji_frames = [emoji_frames[int(i * step)] for i in range(target_n)]
+    emoji_frames = _subsample_frames(emoji_frames, target_n)
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -576,6 +1032,96 @@ def generate_emoji_sticker_apng(
     return out_path
 
 
+def generate_estate_gif_cta_apng(
+    style_id: str,
+    out_path: Path,
+    stickers_dir: Path,
+    *,
+    size: int = 480,
+    fps: int = 12,
+    text: str | None = None,
+) -> Path:
+    """Bake 花字 CTA + optional Noto sparkle/emoji GIFs into looping APNG."""
+    spec = STICKER_SPECS.get(style_id) or STICKER_SPECS[DEFAULT_STICKER]
+    emoji_id = str(spec.get("emoji_id") or "").strip()
+    sparkle_id = str(spec.get("sparkle_id") or "2728")
+    layout = str(spec.get("layout") or "huazi").strip().lower()
+    theme = str(spec.get("theme") or "warm").strip().lower()
+    if theme not in HUAZI_THEMES:
+        theme = "warm"
+    label = (text if text is not None else str(spec.get("text") or "私信了解")).strip()
+    if not label:
+        label = "私信了解"
+
+    emoji_frames: list[Image.Image] | None = None
+    if emoji_id and layout == "bubble":
+        try:
+            emoji_frames = _load_gif_rgba_frames(
+                ensure_emoji_gif(emoji_id, stickers_dir), max_frames=40
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"  warn: emoji gif unavailable ({exc})")
+
+    sparkle_frames: list[Image.Image] | None = None
+    try:
+        sparkle_frames = _load_gif_rgba_frames(
+            ensure_emoji_gif(sparkle_id, stickers_dir), max_frames=40
+        )
+    except Exception as exc:  # noqa: BLE001 — offline fallback
+        print(f"  warn: sparkle gif unavailable ({exc})")
+
+    target_n = max(12, int(fps * 1.25))
+    if emoji_frames:
+        emoji_frames = _subsample_frames(emoji_frames, target_n)
+    if sparkle_frames:
+        sparkle_frames = _subsample_frames(sparkle_frames, target_n)
+    n = max(
+        target_n,
+        len(emoji_frames or []),
+        len(sparkle_frames or []),
+        12,
+    )
+    # Pad frame count when only sparkles / pure procedural
+    if not emoji_frames and not sparkle_frames:
+        n = target_n
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    frames_dir = out_path.parent / f".frames_{style_id}_gif"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+    for i in range(n):
+        frame = _composite_estate_gif_cta(
+            emoji_frames,
+            sparkle_frames,
+            label,
+            size,
+            i,
+            layout=layout if emoji_frames else "huazi",
+            theme=theme,
+        )
+        p = frames_dir / f"f_{i:03d}.png"
+        frame.save(p, "PNG")
+        paths.append(p)
+
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-framerate", str(fps),
+        "-i", str(frames_dir / "f_%03d.png"),
+        "-plays", "0",
+        "-f", "apng",
+        str(out_path),
+    ]
+    subprocess.run(cmd, check=True)
+    for p in paths:
+        p.unlink(missing_ok=True)
+    try:
+        frames_dir.rmdir()
+    except OSError:
+        pass
+    return out_path
+
+
 def generate_sticker_apng(
     style_id: str,
     out_path: Path,
@@ -584,16 +1130,29 @@ def generate_sticker_apng(
     fps: int = 12,
     seconds: float = 1.1,
     stickers_dir: Path | None = None,
+    text: str | None = None,
 ) -> Path:
     if style_id not in STICKER_SPECS:
         raise ValueError(f"Unknown sticker style: {style_id}")
     kind = STICKER_SPECS[style_id]["kind"]
     out_path = Path(out_path)
+    base = stickers_dir or out_path.parent
     if kind == "emoji_badge":
-        base = stickers_dir or out_path.parent
         return generate_emoji_sticker_apng(
             style_id, out_path, base, size=size, fps=fps
         )
+    if kind == "estate_gif_cta":
+        try:
+            return generate_estate_gif_cta_apng(
+                style_id, out_path, base, size=size, fps=fps, text=text
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"  warn: gif CTA failed ({exc}), fallback to plain pill")
+            kind = "estate_cta"
+
+    label = (text if text is not None else str(STICKER_SPECS[style_id].get("text") or "私信")).strip()
+    if not label:
+        label = "私信"
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     frames_dir = out_path.parent / f".frames_{style_id}"
@@ -604,7 +1163,7 @@ def generate_sticker_apng(
     paths: list[Path] = []
     for i in range(n):
         t = i / n
-        frame = _render_frame(kind, hi, t)
+        frame = _render_frame(kind, hi, t, text=label)
         if hi != size:
             frame = frame.resize((size, size), Image.Resampling.LANCZOS)
         p = frames_dir / f"f_{i:03d}.png"

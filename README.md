@@ -18,7 +18,7 @@
 pip install -r requirements.txt
 ```
 
-`requirements.txt`：`opencv-python`、`numpy`、`PyYAML`。
+`requirements.txt`：`opencv-python`、`numpy`、`PyYAML`、`Pillow`（花字 / 贴纸渲染）。
 
 ---
 
@@ -58,71 +58,91 @@ python edit_speed.py --list-styles
 
 在变速之后叠加：
 
-1. **花字**：多层描边短视频花字（最多 5 行），**从片头到片尾**  
-2. **动态私信贴纸**：一体角标（emoji +「私信我」），从 `pack.sticker.start` 秒起一直到结束  
-3. **音频**：删除原声，只保留 BGM（内置 6 首免版税纯音乐，或自备路径）  
+1. **花字**：默认 `douyin_estate` 三级（标题 / 卖点 / 价格），**全程显示**  
+2. **CTA 贴纸**：默认 `dm_estate_cta` **暖橙花字一体式** + 星光点缀；**中段短窗 + 片尾再出**（可配置）  
+3. **音频**：仅 BGM（内置免版税曲库或自备路径）  
 
-每视频可写 **`<stem>.edit.yaml`**（示例见 `examples/sample.edit.yaml`），覆盖 `config.yaml` 里的 `pack.*`。  
-素材与样式明细见 **`assets/README.md`**、BGM 署名见 **`assets/music/README.md`**。
+每视频可写 **`<stem>.edit.yaml`**（示例见 `examples/sample.edit.yaml`），覆盖 `config.yaml` 的 `pack.*`。  
+样式表、贴纸换色 id、预览板见 **`assets/README.md`**；BGM 署名见 **`assets/music/README.md`**。
 
-#### 每视频配置示例（`1.edit.yaml`）
+> 仓库**不存放**任何输入/成片视频（`*.mp4` 等已 gitignore）。请用本地素材路径运行。
+
+#### 每视频配置示例（`<stem>.edit.yaml`）
 
 ```yaml
 pack:
-  style: "douyin_fire"       # 花字样式
+  style: "douyin_estate"
   text:
-    lines:
-      - "绿湖全新未入住"
+    title: "绿湖全新未入住"
+    highlights:
       - "101平三房"
       - "业主忍痛割爱"
-      - "单价5XXX"
+    price: "单价5XXX"
   layout:
-    y_rel: 0.30              # 花字块中心上下：0=顶 1=底
-    # font_size_rel: 0.082   # 可选：字号
-    # line_gap_rel: -0.006   # 可选：行距（负值更紧）
+    y_rel: 0.255
+    max_width_rel: 0.88
+    highlights_mode: "join"   # 或 stack
+  text_motion:
+    enter: "fade"
+    duration: 0.35
+    bounce_px: 0              # 关闭文字跳动
+    pulse: 0
+    sparkle_anim: true        # 价格星光
   sticker:
-    style: "dm_emoji_bubble" # 或 dm_emoji_heart / mail / point
-    start: 4.0
-    width_rel: 0.36          # 贴纸宽度占画面宽
-    x: 0.20                  # 贴纸中心水平 0~1
-    y: 0.91                  # 贴纸中心垂直 0~1
+    style: "dm_estate_cta"    # 锁定默认；换色见 assets/README.md
+    text: "私信了解"          # 私 / 私信 / 私信我 / 私信了解
+    enter: "slide_up"         # none | pop | slide_up
+    enter_ms: 280
+    start: 4.5
+    duration: 2.5
+    repeat_at_end: true
+    end_lead: 2.8
+    width_rel: 0.30
+    x: 0.16
+    y: 0.90
   audio:
-    bgm: "carefree"          # 见下方 BGM 表；也可用 random / 文件路径
+    bgm: "pop_hook"           # curated 默认；或 sl01 / a3 / random
     volume: 0.80
 ```
 
 | 想调什么 | 字段 |
 |----------|------|
-| 标题上下位置 | `layout.y_rel` |
-| 标题字号 / 行距 | `layout.font_size_rel` / `layout.line_gap_rel` |
-| 贴纸位置 / 大小 | `sticker.x` `sticker.y` `sticker.width_rel` |
-| 贴纸何时出现 | `sticker.start` |
-| 背景音乐 | `audio.bgm`（预设 id / `random` / 路径） |
+| 标题/卖点/价格文案 | `text.title` / `highlights` / `price` |
+| 花字上下位置 | `layout.y_rel` |
+| 卖点一行/分行 | `layout.highlights_mode`（`join` / `stack`） |
+| 花字入场 / 星光 | `text_motion.enter` / `sparkle_anim` |
+| CTA 样式（换色） | `sticker.style`（如 `dm_estate_cta_gold`） |
+| CTA 文案（短） | `sticker.text` |
+| CTA 位置 / 大小 | `sticker.x` `sticker.y` `sticker.width_rel` |
+| CTA 时间窗 | `sticker.start` `duration` `repeat_at_end` `end_lead` |
+| CTA 入场动效 | `sticker.enter` / `enter_ms`（默认 `slide_up`） |
+| 背景音乐 | `audio.bgm` |
 
-#### 内置 BGM（CC BY，需署名）
+#### BGM（与 `assets/music/` 对齐）
 
-| id | 气质 |
-|----|------|
-| `carefree` | 轻松明亮（默认） |
-| `easy_lemon` | 柔和俏皮 |
-| `life_of_riley` | 温暖愉快 |
-| `summer_day` | 夏日通透 |
-| `dreamlike` | 柔和梦幻 |
-| `bittersweet` | 轻情绪叙事 |
-| `random` | 随机一首内置 |
+| 组 | id 示例 |
+|----|---------|
+| **curated（默认）** | `pop_hook` / `pop_spark` / `pop_vibe` / `pop_soft` / `pop_drive` / `pop_clean` |
+| shortlist | `sl01` … `sl12` |
+| 本地 `a*.m4a` | `a1` … `a18`（缺号跳过） |
+| 随机 | `random`（优先 curated） |
 
-音频文件较大，默认不进 Git；本地执行 `python scripts/fetch_bgm.py` 下载。
+明细与可选 CC BY 下载：`assets/music/README.md`。
 
 运行时会在本地生成中间产物（可删，可忽略提交）：
 
 ```
 frames/<stem>-<sha1前8位>/
-  motion.csv           # 逐帧运动/边缘指标
-  analysis_cache.json  # 分析缓存指纹
-  segments.json        # 最终分段与倍率
-  filter_complex.txt   # ffmpeg 滤镜脚本
-  summary.json         # 机器可读运行摘要
-  review.mp4           # 可选：--review 代理
+  motion.csv             # 逐帧运动/边缘指标
+  analysis_cache.json    # 分析缓存指纹
+  segments.json          # 最终分段与倍率
+  filter_complex.txt     # ffmpeg 滤镜脚本
+  summary.json           # 机器可读运行摘要
+  review.mp4             # 可选：--review 代理
+  speed_raw.mp4          # --pack 时的变速中间片（--pack-only 复用）
+  pack_title.png|.apng   # 花字图层
+  pack_filter_complex.txt
+  pack_summary.json      # 包装参数与路径摘要
 ```
 
 ---
@@ -140,7 +160,11 @@ clip/
 ├── examples/sample.edit.yaml  # 每视频包装配置示例
 ├── scripts/
 │   ├── bootstrap_assets.py    # 字体 + 贴纸 + BGM
-│   └── fetch_bgm.py           # 仅下载 BGM 曲库
+│   ├── fetch_bgm.py           # 可选 CC BY 曲库下载
+│   ├── audit_bgm.py           # 本地 BGM 听感/时长抽查（自用）
+│   ├── select_rhythmic_bgm.py # 节奏短名单筛选（自用）
+│   ├── rank_bgm_top.py        # BGM 排序辅助（自用）
+│   └── export_shortlist.py    # 导出 shortlist/（自用）
 ├── tests/
 └── walkthrough_edit/
     ├── config.py / analyze.py / classify.py
@@ -263,6 +287,8 @@ analysis:
 segments:
   min_duration: 0.40   # 短于此时长的孤岛并入邻居，减少闪切
 ```
+
+分段过多（例如 >80）时 CLI 会打印 **warning**：导出可能变慢。可略提高 `min_duration`，或简化下面的 `pacing.room_hold_ramp`（停留衰减会把长 room 切成多段）。
 
 ### 5. 实景停留衰减（方案 A）
 
@@ -409,8 +435,20 @@ python -m unittest discover -v
 **Q: 提示找不到 ffmpeg？**  
 把 ffmpeg 加入系统 `PATH`，或在安装目录下确认 `ffmpeg -version` 可用。
 
+**Q: 报错时只有一行 Error，不好查？**  
+非 `--json` 模式下失败会把 **完整 traceback** 打到 stderr，便于对照代码行。
+
+**Q: 导出到一半 Ctrl+C 了？**  
+会尽量结束残留的 ffmpeg 进程，并删除未写完的 `.*.part.mp4` / pack 临时文件，避免留下半成品。
+
+**Q: 提示 segment count is high？**  
+见上文「短段合并」：提高 `segments.min_duration` 或简化 `pacing.room_hold_ramp`。功能仍正常，只是 ffmpeg 滤镜节点变多、可能更慢。
+
+**Q: `--pack` 成片比只变速更糊/更小？**  
+`--pack` 会在变速后再**重编码**一次（叠加花字/贴纸/BGM）。需要极致画质时可先出变速片，再在剪辑软件里叠字幕。
+
 **Q: 音频变调/爆音？**  
-`atempo` 会按相同倍率加速音频；极端倍率由多级 `atempo` 串联。无音轨视频会自动只处理画面。
+`atempo` 会按相同倍率加速音频；极端倍率由多级 `atempo` 串联。无音轨视频会自动只处理画面。`--pack` 成片默认**去掉原声**，只留 BGM。
 
 **Q: 能否批量处理？**  
 
@@ -421,10 +459,48 @@ python edit_speed.py b.mp4
 ```
 
 **Q: 和剪映手动比？**  
-适合统一风格的带看粗剪；成片若需字幕、BGM、封面，可把 `*_edited.mp4` 再导入剪辑软件。
+适合统一风格的带看粗剪 + 可选房产包装；仍可把 `*_edited.mp4` 再导入剪辑软件精修。
 
 ---
 
 ## License
 
 按需自用 / 修改。素材版权归原作者所有；请勿将未授权视频提交进仓库。
+
+---
+
+## 房产包装（`douyin_estate` + `dm_estate_cta`）
+
+- 花字：标题 / 卖点 / 价格独立字号；卖点 `join` 或 `stack`  
+- CTA：锁定 **花字一体式** `dm_estate_cta`（暖橙 + 星光）；双窗 + 可配置短文案  
+- 换色贴纸 id 与总览预览：见 **`assets/README.md`**
+
+```yaml
+pack:
+  layout:
+    highlights_mode: join
+  text_motion:
+    enter: fade
+    bounce_px: 0
+    sparkle_anim: true
+  sticker:
+    style: dm_estate_cta
+    text: "私信了解"
+    start: 4.5
+    duration: 2.5
+    repeat_at_end: true
+    end_lead: 2.8
+    enter: slide_up
+    enter_ms: 280
+    width_rel: 0.30
+```
+
+旧版 `text.lines` 仍兼容（首行标题、末行价格、中间卖点）。
+
+测试：
+
+```bash
+python -m pytest tests/test_core.py -q
+# 或
+python -m unittest discover -v
+```

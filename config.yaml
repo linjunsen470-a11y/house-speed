@@ -129,37 +129,52 @@ review:
 pack:
   enabled: false
   assets_dir: "assets"
-  # 花字（多层描边，非字幕条）：
-  #   douyin_fire | douyin_pink | douyin_lemon | douyin_mint |
-  #   douyin_gold | douyin_violet | douyin_sky | douyin_candy
-  style: "douyin_fire"
+  # 花字：douyin_estate（标题/卖点/价格三级）| douyin_fire | douyin_pink | …
+  style: "douyin_estate"
   fontfile: ""
   text:
-    # 推荐用 lines（最多 5 行），也兼容 line1..line4
+    title: ""
+    highlights: []
+    price: ""
+    # 兼容旧写法：lines 首行=title，末行=price，中间=highlights
     lines: []
-    # line1: "绿湖全新未入住"
-    # line2: "101平三房"
-    # line3: "业主忍痛割爱"
-    # line4: "单价5XXX"
   layout:
-    y_rel: 0.30          # 花字块中心：0=顶 1=底（0.30≈偏上）
-    max_width_rel: 0.90  # 花字最大宽度占画面宽
-    # font_size_rel: 0.082  # 可选：覆盖样式默认字号（相对画面短边）
-    # line_gap_rel: -0.006  # 可选：行距；0更紧，负值再贴紧（描边留白重叠）
+    y_rel: 0.255         # 花字块中心上下（偏上安全区）
+    max_width_rel: 0.88
+    highlights_mode: "join"  # join=「A · B」一行 | stack=卖点分行
+    # font_size_rel / line_gap_rel / sparkle 可选
+  text_motion:
+    enter: "fade"        # none | fade | pop（默认淡入）
+    duration: 0.35
+    bounce_px: 0         # 关闭文字跳动
+    bounce_period: 1.4
+    pulse: 0             # 关闭透明度抖动
+    pulse_period: 2.0
+    sparkle_anim: true   # 价格旁星星闪烁（APNG）
+    sparkle_fps: 10
+    sparkle_frames: 10
   sticker:
     enabled: true
-    # dm_emoji_bubble | dm_emoji_heart | dm_emoji_mail | dm_emoji_point
-    # | dm_follow_me | dm_pink_wave | dm_chat_pop | dm_heart_tap | dm_bell_cute | dm_hand_cute
-    style: "dm_emoji_bubble"
-    start: 5.0
-    width_rel: 0.30      # 贴纸宽度占画面宽（越大贴纸越大）
-    x: 0.16              # 贴纸中心水平：0=左 0.5=中 1=右
-    y: 0.90              # 贴纸中心垂直：0=顶 1=底
-    file: ""             # 自备透明 APNG/GIF/WebM 时填路径
+    # 锁定默认：暖橙花字+星光。同结构换色：
+    # dm_estate_cta_gold | _sky | _mint | _violet | _snow | _heart | _fire
+    style: "dm_estate_cta"
+    text: "私信了解"         # 私 / 私信 / 私信我 / 私信了解
+    start: 4.5               # 首窗开始秒
+    duration: 2.5            # 首窗时长 → 默认 4.5–7.0s
+    repeat_at_end: true      # 片尾再出一次
+    end_lead: 2.8            # 片尾窗长度（秒）
+    width_rel: 0.30
+    x: 0.16
+    y: 0.90
+    file: ""                 # 自备透明 APNG/GIF 时填路径（忽略绘制）
+    enter: "slide_up"        # none | pop | slide_up
+    enter_ms: 280
+    fps: 12
   audio:
-    # 内置：carefree | easy_lemon | life_of_riley | summer_day | dreamlike | bittersweet | random
-    # 或路径：assets/music/xxx.mp3（见 assets/music/README.md，CC BY 署名）
-    bgm: "carefree"
+    # 默认 curated：pop_hook | pop_spark | pop_vibe | pop_soft | pop_drive | pop_clean
+    # 短名单：sl01…sl12 或 shortlist/01.mp3
+    # 本地库：a1…a18（缺号自动跳过）| random = 优先 curated
+    bgm: "pop_hook"
     volume: 0.80
     fade_in: 0.5
     fade_out: 0.8

@@ -26,13 +26,18 @@ legacy/
 *.part.mp4
 .*.part.mp4
 
-# --- Media (local only) ---
+# --- Media: never commit videos / bulk images ---
 *.mp4
 *.mov
 *.avi
 *.mkv
 *.webm
 *.m4v
+*.wmv
+*.flv
+*.mpeg
+*.mpg
+*.3gp
 *.jpg
 *.jpeg
 *.png
@@ -45,22 +50,39 @@ legacy/
 *.svg
 images/
 
-# Keep pack asset previews + generated stickers + small fonts in repo
+# Keep pack asset docs + small fonts + style previews in repo
 !assets/
 !assets/**
 !assets/text_previews/*.png
-!assets/stickers/*.apng
+!assets/stickers/previews/*.png
+!assets/style_board/*.png
 !assets/fonts/*.ttf
 !assets/fonts/*.otf
-# BGM audio is large — download via scripts/fetch_bgm.py; keep docs
+
+# BGM audio is large — keep only markdown docs in git
 assets/music/**
-!assets/music/README.md
-# Raw emoji GIF cache / scratch (APNG stickers are the production asset)
+!assets/music/**/
+!assets/music/**/*.md
+
+# Do not commit random audio dumps under assets/
+assets/*.mp3
+assets/*.m4a
+assets/*.wav
+assets/*.aac
+assets/*.flac
+assets/*.ogg
+
+# Sticker scratch / generated APNG cache / Noto GIF download cache
 assets/stickers/external/
 assets/stickers/_candidates/
+assets/stickers/.generated/
+assets/style_board/_sticker_work/
+assets/style_board/_tmp_*/
+assets/stickers/*.apng
 assets/stickers/preview_*.jpg
 assets/stickers/preview_*.png
 assets/stickers/_test.png
+
 # Optional large CJK fonts (download yourself)
 assets/fonts/LXGW*.ttf
 assets/fonts/SourceHan*

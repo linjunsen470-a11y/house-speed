@@ -16,6 +16,7 @@ from contextlib import redirect_stdout
 import io
 import json
 import sys
+import traceback
 from pathlib import Path
 
 
@@ -116,12 +117,18 @@ def main(argv: list[str] | None = None) -> int:
         print("\nSticker styles (pack.sticker.style):")
         for key, meta in STICKER_SPECS.items():
             print(f"  {key:16s}  {meta.get('label', '')}")
+        from walkthrough_edit.music_catalog import list_bgm_ids_present
+
         print("\nBGM presets (pack.audio.bgm):")
-        print("  random           从内置曲库随机选一首")
+        print("  random           优先 curated，否则 shortlist / a*")
+        assets = root / "assets"
+        present = set(list_bgm_ids_present(assets))
         for key, meta in BGM_PRESETS.items():
+            mark = " " if key in present else "!"
             print(
-                f"  {key:16s}  {meta.get('label', '')}  — {meta.get('vibe', '')}"
+                f"  {mark}{key:15s}  {meta.get('label', '')}  — {meta.get('vibe', '')}"
             )
+        print("  (! = 文件不在磁盘；CC BY 可 python scripts/fetch_bgm.py)")
         return 0
 
     if not args.input:
@@ -170,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False))
             return 1
         print(f"Error: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return 1
     return 0
 

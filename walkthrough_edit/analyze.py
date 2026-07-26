@@ -34,37 +34,39 @@ def analyze_motion(video_path: str, cfg: dict[str, Any]) -> tuple[list[dict], fl
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video_path}")
 
-    fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
-    prev = None
-    rows: list[dict] = []
-    idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        small = cv2.resize(gray, (w, h))
-        mean = float(small.mean())
-        std = float(small.std())
-        edges = cv2.Canny(small, canny_lo, canny_hi)
-        edge_ratio = float(edges.mean()) / 255.0
-        if prev is None:
-            motion = 0.0
-        else:
-            motion = float(cv2.absdiff(small, prev).mean())
-        rows.append(
-            {
-                "idx": idx,
-                "t": idx / fps,
-                "mean": mean,
-                "std": std,
-                "edge": edge_ratio,
-                "motion": motion,
-            }
-        )
-        prev = small
-        idx += 1
-    cap.release()
+    try:
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+        prev = None
+        rows: list[dict] = []
+        idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            small = cv2.resize(gray, (w, h))
+            mean = float(small.mean())
+            std = float(small.std())
+            edges = cv2.Canny(small, canny_lo, canny_hi)
+            edge_ratio = float(edges.mean()) / 255.0
+            if prev is None:
+                motion = 0.0
+            else:
+                motion = float(cv2.absdiff(small, prev).mean())
+            rows.append(
+                {
+                    "idx": idx,
+                    "t": idx / fps,
+                    "mean": mean,
+                    "std": std,
+                    "edge": edge_ratio,
+                    "motion": motion,
+                }
+            )
+            prev = small
+            idx += 1
+    finally:
+        cap.release()
 
     if not rows:
         raise RuntimeError(f"No frames read from {video_path}")
