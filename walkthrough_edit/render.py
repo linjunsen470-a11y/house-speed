@@ -275,6 +275,7 @@ def build_review_filter(
 
 
 def probe_duration(path: str | Path) -> float:
+    # Use -i so paths like "-1a.mp4" are not parsed as ffprobe options.
     cmd = [
         "ffprobe",
         "-v",
@@ -283,6 +284,7 @@ def probe_duration(path: str | Path) -> float:
         "format=duration",
         "-of",
         "default=noprint_wrappers=1:nokey=1",
+        "-i",
         str(path),
     ]
     out = subprocess.check_output(cmd, text=True).strip()
@@ -300,6 +302,7 @@ def has_audio_stream(path: str | Path) -> bool:
         "stream=index",
         "-of",
         "csv=p=0",
+        "-i",
         str(path),
     ]
     out = subprocess.check_output(cmd, text=True).strip()
@@ -323,6 +326,7 @@ def probe_media(path: str | Path) -> dict[str, Any]:
         "format=duration,size,bit_rate:stream=index,codec_type,codec_name,bit_rate,width,height",
         "-of",
         "json",
+        "-i",
         str(path),
     ]
     data = json.loads(subprocess.check_output(cmd, text=True))

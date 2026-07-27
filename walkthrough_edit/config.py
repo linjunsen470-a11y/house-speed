@@ -57,11 +57,12 @@ DEFAULTS: dict[str, Any] = {
     "segments": {
         "min_duration": 0.45,
         "min_fast_duration": 1.2,
-        "sandwich_demote_fast_max": 3.0,
+        "sandwich_demote_fast_max": 4.0,
         "sandwich_demote_need_high_struct": True,
+        "sandwich_neighbor_edge_min": 0.10,
         "corridor_promote_min_sec": 1.2,
         "structured_fast_demote_min_sec": 2.0,
-        "structured_fast_demote_edge_min": 0.08,
+        "structured_fast_demote_edge_min": 0.065,
     },
     "pacing": {
         "enabled": True,
@@ -298,7 +299,7 @@ def _validate(cfg: dict[str, Any]) -> None:
         segs.get("min_fast_duration", 0.9), "segments.min_fast_duration", minimum=0
     )
     segs["sandwich_demote_fast_max"] = _number(
-        segs.get("sandwich_demote_fast_max", 2.5),
+        segs.get("sandwich_demote_fast_max", 4.0),
         "segments.sandwich_demote_fast_max",
         minimum=0,
     )
@@ -313,12 +314,19 @@ def _validate(cfg: dict[str, Any]) -> None:
         minimum=0,
     )
     segs["structured_fast_demote_edge_min"] = _number(
-        segs.get("structured_fast_demote_edge_min", 0.08),
+        segs.get("structured_fast_demote_edge_min", 0.065),
         "segments.structured_fast_demote_edge_min",
         minimum=0,
     )
     if segs["structured_fast_demote_edge_min"] > 1:
         raise ValueError("segments.structured_fast_demote_edge_min must be <= 1")
+    segs["sandwich_neighbor_edge_min"] = _number(
+        segs.get("sandwich_neighbor_edge_min", 0.10),
+        "segments.sandwich_neighbor_edge_min",
+        minimum=0,
+    )
+    if segs["sandwich_neighbor_edge_min"] > 1:
+        raise ValueError("segments.sandwich_neighbor_edge_min must be <= 1")
     segs["sandwich_demote_need_high_struct"] = bool(
         segs.get("sandwich_demote_need_high_struct", True)
     )

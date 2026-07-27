@@ -346,15 +346,23 @@ def demote_sandwich_fast(
     max_fast_dur: float,
     speeds: dict[str, float],
     require_high_struct_neighbors: bool = True,
+    neighbor_edge_min: float | None = None,
 ) -> list[dict]:
     """
-    room — short fast — room with high-structure neighbors → demote fast to room.
+    room — digression (fast, optionally short move) — room → flatten to room.
 
-    Asymmetric: only demotes when neighbors look like real rooms, so true
-    corridor dashes between mid-structure stretches are kept.
+    Targets living→bath→living whip pans: both ends look informative while the
+    middle is a brief look-away accelerated to 3×. True corridor dashes between
+    mid-structure stretches are kept when neighbor edges stay low.
     """
     if len(segs) < 3 or max_fast_dur <= 0:
         return segs
+    # Slightly below content_struct_min so 0.114-class rooms still count
+    n_edge = (
+        float(neighbor_edge_min)
+        if neighbor_edge_min is not None
+        else max(0.10, float(content_struct_min) - 0.02)
+    )
     segs = [dict(s) for s in segs]
     changed = True
     while changed:
@@ -364,11 +372,15 @@ def demote_sandwich_fast(
             cur = segs[i]
             left, right = segs[i - 1], segs[i + 1]
             dur = float(cur["t1"]) - float(cur["t0"])
+            # fast always; short move also (look-away walk)
+            mid_ok = cur["kind"] == "fast" or (
+                cur["kind"] == "move" and dur <= max_fast_dur * 0.75
+            )
             if (
-                cur["kind"] == "fast"
+                mid_ok
                 and left["kind"] == "room"
                 and right["kind"] == "room"
-                and dur < max_fast_dur
+                and dur <= max_fast_dur + 1e-9
             ):
                 ok = True
                 if require_high_struct_neighbors and rows:
@@ -378,8 +390,17 @@ def demote_sandwich_fast(
                     re = _segment_mean(
                         rows, float(right["t0"]), float(right["t1"]), "edge"
                     )
-                    ok = le >= content_struct_min and re >= content_struct_min
+                    ok = le >= n_edge and re >= n_edge
                 if ok:
+                    # Only flatten digressions that are not pure blank walls
+                    if rows and cur["kind"] == "fast":
+                        mid_e = _segment_mean(
+                            rows, float(cur["t0"]), float(cur["t1"]), "edge"
+                        )
+                        # Keep true empty-wall fast between rooms if middle is flat
+                        if mid_e < 0.04 and dur >= 1.5:
+                            i += 1
+                            continue
                     cur["kind"] = "room"
                     cur["speed"] = float(speeds["room"])
                     segs = coalesce_adjacent(segs)
@@ -492,6 +513,14 @@ def promote_corridor_rooms(
             p20_e = _segment_percentile(
                 rows, float(item["t0"]), float(item["t1"]), "edge", 0.2
             )
+            p80_e = _segment_percentile(
+                rows, float(item["t0"]), float(item["t1"]), "edge", 0.8
+            )
+            # Still has room-like content peaks (furniture / half-living) — do not
+            # promote whole run to move/fast (would re-whip digressions).
+            if p80_e >= content_struct_min or mean_e >= content_struct_min * 0.9:
+                out.append(item)
+                continue
             # Mid-structure sustained walk; not a dense living-room hold
             mid = (
                 corridor_struct_lo <= mean_e <= corridor_struct_hi
@@ -797,17 +826,25 @@ def build_segments(
     )
     wall_edge_max = float(c["wall_edge_max"])
 
+    sandwich_max = float(segs_cfg.get("sandwich_demote_fast_max", 4.0))
+    sandwich_need = bool(segs_cfg.get("sandwich_demote_need_high_struct", True))
+    sandwich_n_edge = float(
+        segs_cfg.get(
+            "sandwich_neighbor_edge_min",
+            max(0.10, content_struct_min - 0.02),
+        )
+    )
+
     # Drop false fast on content-rich pans
     segs = demote_high_struct_fast(segs, rows, content_struct_min, speeds)
     segs = demote_sandwich_fast(
         segs,
         rows,
         content_struct_min=content_struct_min,
-        max_fast_dur=float(segs_cfg.get("sandwich_demote_fast_max", 2.5)),
+        max_fast_dur=sandwich_max,
         speeds=speeds,
-        require_high_struct_neighbors=bool(
-            segs_cfg.get("sandwich_demote_need_high_struct", True)
-        ),
+        require_high_struct_neighbors=sandwich_need,
+        neighbor_edge_min=sandwich_n_edge,
     )
     # Low-edge flats left as room (high-std colored walls) → fast
     segs = promote_flat_rooms(segs, rows, cfg)
@@ -816,6 +853,17 @@ def build_segments(
     # After promote: long high-structure "fast" → move (corridor walking ≠ blank wall)
     # Must run *after* promote_corridor so it cannot re-upgrade walking to 3x.
     segs = demote_long_structured_fast(segs, rows, cfg)
+    # Second sandwich pass: catch living→bath→living digressions reintroduced
+    # or slightly longer than the first pass threshold.
+    segs = demote_sandwich_fast(
+        segs,
+        rows,
+        content_struct_min=content_struct_min,
+        max_fast_dur=sandwich_max,
+        speeds=speeds,
+        require_high_struct_neighbors=sandwich_need,
+        neighbor_edge_min=sandwich_n_edge,
+    )
     # Remove short non-wall fast flickers
     segs = absorb_short_fast(
         segs,

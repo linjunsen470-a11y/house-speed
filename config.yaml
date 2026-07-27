@@ -90,14 +90,16 @@ segments:
   min_duration: 0.45
   # 非空墙的短 fast 并入邻段（抑制 1×↔3× 闪切）
   min_fast_duration: 1.2
-  # room—短 fast—room 且两侧高结构 → 否决为 room（客厅误伤）
-  sandwich_demote_fast_max: 3.0
+  # room—离题 fast/短 move—room 且两侧有结构 → 压成 room
+  # （客厅→洗手间→客厅 1×→3×→1× 甩镜；阈值略松以覆盖 ~3s 中段）
+  sandwich_demote_fast_max: 4.0
   sandwich_demote_need_high_struct: true
+  sandwich_neighbor_edge_min: 0.10
   # 长中结构 room + 持续行走 → 提升为 move/fast（过道漏判）
   corridor_promote_min_sec: 1.2
   # 长 fast 且段均 edge 仍高 → 降为 move（过道误 3×，如 2a 18–27s）
   structured_fast_demote_min_sec: 2.0
-  structured_fast_demote_edge_min: 0.08
+  structured_fast_demote_edge_min: 0.065
 
 # --- 方案 A：实景停留衰减（room hold ramp）-------------------------------------
 # 连续 room 段内按「已停留时长」分段提速，压缩同一空间过久停留，仍不删帧。
