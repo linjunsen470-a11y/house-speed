@@ -366,13 +366,27 @@ def frame_flow_phase(
     """
     if cv2 is None:
         return 0.0, 0.0
+    dx, dy, _response = frame_flow_phase_response(prev_gray, cur_gray)
+    return dx, dy
+
+
+def frame_flow_phase_response(
+    prev_gray: np.ndarray, cur_gray: np.ndarray
+) -> tuple[float, float, float]:
+    """Global translation plus phase-correlation confidence in ``[0, 1]``."""
+    if cv2 is None:
+        return 0.0, 0.0, 0.0
     a = prev_gray.astype(np.float32)
     b = cur_gray.astype(np.float32)
     try:
-        (dx, dy), _resp = cv2.phaseCorrelate(a, b)
-        return float(dx), float(dy)
+        (dx, dy), response = cv2.phaseCorrelate(a, b)
+        return (
+            float(dx),
+            float(dy),
+            float(np.clip(response, 0.0, 1.0)),
+        )
     except cv2.error:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0
 
 
 def extract_fingerprints_from_video(

@@ -4,8 +4,10 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
+import tempfile
 from typing import Any
 
 from .analyze import analyze_motion
@@ -61,6 +63,10 @@ def _work_dir(input_path: Path, configured: str) -> Path:
     return Path(configured) / f"{input_path.stem}-{digest}"
 
 
+# Bump when row schema / features used by classify change (invalidates cache).
+_ANALYSIS_CACHE_VERSION = 3
+
+
 def _analysis_fingerprint(input_path: Path, cfg: dict[str, Any]) -> dict[str, Any]:
     stat = input_path.stat()
     return {
@@ -68,8 +74,138 @@ def _analysis_fingerprint(input_path: Path, cfg: dict[str, Any]) -> dict[str, An
         "size": stat.st_size,
         "mtime_ns": stat.st_mtime_ns,
         "analysis": cfg["analysis"],
-        "cache_version": 1,
+        "cache_version": _ANALYSIS_CACHE_VERSION,
     }
+
+
+def _source_fingerprint(input_path: Path) -> dict[str, Any]:
+    stat = input_path.stat()
+    return {
+        "path": str(input_path.resolve()),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write a small metadata file atomically in its destination directory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as file:
+            file.write(text)
+            temporary = Path(file.name)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink(missing_ok=True)
+
+
+def _stage_a_config_digest(cfg: dict[str, Any]) -> str:
+    """Hash only settings that affect analysis, segmentation, or raw rendering."""
+    keys = (
+        "algorithm",
+        "analysis",
+        "classify",
+        "speeds",
+        "segments",
+        "scene_aba",
+        "pacing",
+        "overrides",
+        "encode",
+    )
+    payload = {key: cfg.get(key) for key in keys}
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _raw_provenance_path(work: Path) -> Path:
+    return work / "speed_raw.meta.json"
+
+
+def _write_raw_provenance(
+    path: Path,
+    input_path: Path,
+    raw_path: Path,
+    cfg: dict[str, Any],
+) -> None:
+    payload = {
+        "version": 1,
+        "source": _source_fingerprint(input_path),
+        "stage_a_config_sha256": _stage_a_config_digest(cfg),
+        "raw": {
+            "path": str(raw_path.resolve()),
+            "size": raw_path.stat().st_size,
+            "mtime_ns": raw_path.stat().st_mtime_ns,
+        },
+    }
+    _atomic_write_text(
+        path,
+        json.dumps(payload, indent=2, ensure_ascii=False),
+    )
+
+
+def _validate_pack_only_source(
+    input_path: Path,
+    raw_path: Path,
+    work: Path,
+    cfg: dict[str, Any],
+) -> list[str]:
+    """Reject a raw intermediate known to belong to another source revision."""
+    warnings_out: list[str] = []
+    current_source = _source_fingerprint(input_path)
+    provenance_path = _raw_provenance_path(work)
+    if provenance_path.is_file():
+        try:
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            if provenance.get("source") != current_source:
+                raise ValueError(
+                    "pack-only intermediate is stale: the source video changed; "
+                    "run once without --pack-only"
+                )
+            raw_meta = provenance.get("raw") or {}
+            if int(raw_meta.get("size") or -1) != raw_path.stat().st_size:
+                raise ValueError(
+                    "pack-only intermediate does not match its provenance; "
+                    "run once without --pack-only"
+                )
+            if provenance.get("stage_a_config_sha256") != _stage_a_config_digest(cfg):
+                warnings_out.append(
+                    "Stage-A config changed since speed_raw.mp4 was rendered; "
+                    "reusing it because --pack-only explicitly requests reuse"
+                )
+            return warnings_out
+        except (OSError, TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"Invalid pack-only provenance {provenance_path}: {exc}"
+            ) from exc
+
+    # Backward compatibility for intermediates produced before provenance.
+    cache_meta = work / "analysis_cache.json"
+    if cache_meta.is_file():
+        try:
+            cached = json.loads(cache_meta.read_text(encoding="utf-8"))
+            old_source = cached.get("fingerprint") or {}
+            comparable = {key: old_source.get(key) for key in current_source}
+            if comparable != current_source:
+                raise ValueError(
+                    "legacy pack-only intermediate is stale: the source video changed; "
+                    "run once without --pack-only"
+                )
+        except (OSError, TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Invalid legacy analysis cache {cache_meta}: {exc}") from exc
+    warnings_out.append(
+        "speed_raw.mp4 has no provenance metadata; source identity was checked "
+        "with the legacy cache where possible"
+    )
+    return warnings_out
 
 
 def _read_motion(path: Path) -> list[dict]:
@@ -87,12 +223,122 @@ def _read_motion(path: Path) -> list[dict]:
 
 
 def _write_motion(path: Path, rows: list[dict]) -> None:
-    with open(path, "w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(
-            file, fieldnames=["idx", "t", "mean", "std", "edge", "motion"]
-        )
-        writer.writeheader()
-        writer.writerows(rows)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            newline="",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as file:
+            temporary = Path(file.name)
+            writer = csv.DictWriter(
+                file, fieldnames=["idx", "t", "mean", "std", "edge", "motion"]
+            )
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({
+                    "idx": row["idx"],
+                    "t": row["t"],
+                    "mean": row["mean"],
+                    "std": row["std"],
+                    "edge": row["edge"],
+                    "motion": row["motion"],
+                })
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink(missing_ok=True)
+
+
+def _features_path(work: Path) -> Path:
+    return work / "analysis_features.npz"
+
+
+def _write_features(path: Path, rows: list[dict]) -> None:
+    """Sidecar for appearance fingerprints + phase-correlation flow."""
+    import numpy as np
+
+    appearance = np.stack(
+        [np.asarray(r["appearance"], dtype=np.float32) for r in rows], axis=0
+    )
+    scalar_keys = (
+        "flow_dx",
+        "flow_dy",
+        "flow_response",
+        "flow_magnitude",
+        "flow_direction_consistency",
+        "entropy",
+        "sharpness",
+        "information_score",
+        "camera_motion_score",
+    )
+    scalars = {
+        key: np.array([float(r.get(key, 0.0)) for r in rows], dtype=np.float32)
+        for key in scalar_keys
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w+b",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp.npz",
+            delete=False,
+        ) as file:
+            temporary = Path(file.name)
+            np.savez_compressed(file, appearance=appearance, **scalars)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink(missing_ok=True)
+
+
+def _attach_features(rows: list[dict], path: Path) -> bool:
+    """Merge appearance/flow from npz into rows. Returns False if missing/mismatch."""
+    import numpy as np
+
+    if not path.is_file():
+        return False
+    scalar_keys = (
+        "flow_dx",
+        "flow_dy",
+        "flow_response",
+        "flow_magnitude",
+        "flow_direction_consistency",
+        "entropy",
+        "sharpness",
+        "information_score",
+        "camera_motion_score",
+    )
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            appearance = np.asarray(data["appearance"], dtype=np.float32).copy()
+            arrays = {
+                key: np.asarray(data[key], dtype=np.float32).copy()
+                for key in scalar_keys
+            }
+    except (OSError, KeyError, ValueError):
+        return False
+    n = len(rows)
+    if appearance.ndim != 2 or appearance.shape[0] != n:
+        return False
+    if any(array.ndim != 1 or len(array) != n for array in arrays.values()):
+        return False
+    if not np.isfinite(appearance).all() or any(
+        not np.isfinite(array).all() for array in arrays.values()
+    ):
+        return False
+    for i, row in enumerate(rows):
+        row["appearance"] = appearance[i]
+        for key, array in arrays.items():
+            row[key] = float(array[i])
+    return True
 
 
 def _load_analysis(
@@ -103,13 +349,17 @@ def _load_analysis(
 ) -> tuple[list[dict], float, bool]:
     motion_path = work / "motion.csv"
     meta_path = work / "analysis_cache.json"
+    features_path = _features_path(work)
     fingerprint = _analysis_fingerprint(input_path, cfg)
     cache_enabled = bool((cfg.get("cache") or {}).get("enabled", True))
     if cache_enabled and not reanalyze and motion_path.is_file() and meta_path.is_file():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             if meta.get("fingerprint") == fingerprint:
-                return _read_motion(motion_path), float(meta["fps"]), True
+                rows = _read_motion(motion_path)
+                if _attach_features(rows, features_path):
+                    return rows, float(meta["fps"]), True
+                # Old cache without features → fall through and reanalyze
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             pass
 
@@ -117,9 +367,10 @@ def _load_analysis(
     if cache_enabled or cfg["io"].get("save_motion_csv", True):
         _write_motion(motion_path, rows)
     if cache_enabled:
-        meta_path.write_text(
+        _write_features(features_path, rows)
+        _atomic_write_text(
+            meta_path,
             json.dumps({"fingerprint": fingerprint, "fps": fps}, indent=2),
-            encoding="utf-8",
         )
     return rows, fps, False
 
@@ -226,7 +477,9 @@ def run_pipeline(
                 pass
         total_in = sum(float(s["t1"]) - float(s["t0"]) for s in segs) if segs else 0.0
         total_out_est = estimate_output_duration(segs, fps) if segs else probe_duration(raw_path)
-        warnings: list[str] = []
+        warnings = _validate_pack_only_source(input_path, raw_path, work, cfg)
+        for warning in warnings:
+            print(f"  warning: {warning}")
         print(f"\nPack-only -> {output_path}")
         out_dur = pack_video(
             raw_path, output_path, cfg, work, project_root=project_root
@@ -362,6 +615,13 @@ def run_pipeline(
         log_path=work / "ffmpeg.log",
         fps=fps,
     )
+    if pack_enabled:
+        _write_raw_provenance(
+            _raw_provenance_path(work),
+            input_path,
+            export_target,
+            cfg,
+        )
     if not io.get("save_filter_script", True) and filter_script.exists():
         filter_script.unlink(missing_ok=True)
 

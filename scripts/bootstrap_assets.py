@@ -74,7 +74,7 @@ def demo_bgm() -> None:
 
 def fetch_bgm_library() -> None:
     fetch_script = Path(__file__).with_name("fetch_bgm.py")
-    subprocess.run([sys.executable, str(fetch_script)], check=False)
+    subprocess.run([sys.executable, str(fetch_script)], check=True)
 
 
 def main() -> int:

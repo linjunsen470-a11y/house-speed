@@ -159,8 +159,8 @@ pack（可选）  花字 + CTA + BGM
 5. **段级**：  
    - `room—短 fast—room` 且两侧有结构 → 压回 `room`（离题扫视）  
    - 长 fast 且段均 edge 仍高 → 降为 `move`（过道误 3×）  
+   - 场景 A→B→A（外观指纹 + 相位光流）→ 离题中段压回 `room`（真空墙除外）
    - 近静止（motion 低且持续）→ 至少 `static_boost_speed`（默认 2.7×）
-
 ### 停留衰减与静止
 
 - `pacing.room_hold_ramp`：同一 room 内随停留时长提速  
@@ -250,16 +250,35 @@ encode:
 ## 测试
 
 ```bash
+python -m pip install -r requirements-dev.txt
 python -m pytest tests/ -q
 # 或
 python -m unittest discover -v
 ```
+
+由 IDE AI agent 修改代码前，请先阅读根目录 `AGENTS.md`。
 
 分段手标评估：
 
 ```bash
 python evaluate_segments.py frames/<stem-hash>/segments.json labels.yaml
 ```
+
+数据集级评估与按视频留一调参：
+
+```bash
+# 汇总 accuracy / macro-F1 / room→fast / 倍速跳变等
+python evaluate_segments.py --dataset eval/strict --work-root frames
+
+# 复用 frames 缓存做小范围网格搜索和 leave-one-video-out 验证
+python scripts/tune_segments.py
+
+# 新评分/迟滞分类器只做离线 A/B；默认仍是 legacy
+python scripts/tune_segments.py --mode candidate
+```
+
+新标注格式与盲标流程见 `examples/EVALUATION_LABELS.md`。只有独立视频达到验收门槛后，
+才应把 `algorithm.mode` 从 `legacy` 改为 `candidate`。
 
 ---
 

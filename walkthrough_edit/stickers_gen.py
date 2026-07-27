@@ -730,13 +730,13 @@ def ensure_emoji_gif(emoji_id: str, stickers_dir: Path) -> Path:
 
 def _load_gif_rgba_frames(path: Path, max_frames: int = 48) -> list[Image.Image]:
     """Decode GIF frames to RGBA (Noto emoji frames are self-contained)."""
-    im = Image.open(path)
     frames: list[Image.Image] = []
-    for i, frame in enumerate(ImageSequence.Iterator(im)):
-        if i >= max_frames:
-            break
-        # convert() handles palette transparency → alpha
-        frames.append(frame.convert("RGBA"))
+    with Image.open(path) as im:
+        for i, frame in enumerate(ImageSequence.Iterator(im)):
+            if i >= max_frames:
+                break
+            # convert() returns a detached image, safe after closing the GIF.
+            frames.append(frame.convert("RGBA"))
     if not frames:
         frames = [Image.new("RGBA", (512, 512), (0, 0, 0, 0))]
     return frames

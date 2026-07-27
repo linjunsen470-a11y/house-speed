@@ -200,6 +200,78 @@ def classify_frames(rows: list[dict], cfg: dict[str, Any]) -> list[str]:
     return labels
 
 
+def classify_frames_candidate(rows: list[dict], cfg: dict[str, Any]) -> list[str]:
+    """
+    Opt-in score classifier used for offline A/B evaluation.
+
+    It deliberately reuses the existing post-processing pipeline. The only
+    new behavior here is a two-score decision followed by time-based
+    hysteresis, so a candidate state must persist before a speed class flips.
+    """
+    if not rows:
+        return []
+    candidate = ((cfg.get("algorithm") or {}).get("candidate") or {})
+    low_info = float(candidate.get("low_information_max", 0.28))
+    high_info = float(candidate.get("high_information_min", 0.64))
+    move_motion = float(candidate.get("move_motion_min", 0.34))
+    fast_motion = float(candidate.get("fast_motion_min", 0.72))
+    hold_sec = float(candidate.get("hysteresis_sec", 0.25))
+
+    raw: list[str] = []
+    for row in rows:
+        info = row.get("information_score")
+        camera = row.get("camera_motion_score")
+        if info is None:
+            # Match analyze._attach_temporal_scores weights (keep fallback consistent).
+            edge = float(row.get("edge", 0.0))
+            entropy = float(row.get("entropy", 0.0))
+            sharpness = float(row.get("sharpness", 0.0))
+            info = (
+                0.55 * float(np.clip((edge - 0.025) / 0.11, 0.0, 1.0))
+                + 0.25 * float(np.clip((entropy - 2.0) / 2.8, 0.0, 1.0))
+                + 0.20
+                * float(np.clip(np.log1p(sharpness) / np.log1p(900.0), 0.0, 1.0))
+            )
+        if camera is None:
+            camera = float(np.clip(float(row.get("motion", 0.0)) / 22.0, 0.0, 1.0))
+        info = float(info)
+        camera = float(camera)
+        coherence = float(row.get("flow_direction_consistency", 0.0))
+        # Coherent motion over informative content is commonly a deliberate pan.
+        effective_motion = camera * (1.0 - 0.25 * coherence * info)
+
+        if info <= low_info:
+            raw.append("fast")
+        elif info >= high_info:
+            raw.append("room")
+        elif effective_motion >= fast_motion:
+            raw.append("fast")
+        elif effective_motion >= move_motion:
+            raw.append("move")
+        else:
+            raw.append("room")
+
+    if hold_sec <= 0:
+        return raw
+    times = [float(row["t"]) for row in rows]
+    current = raw[0]
+    pending: str | None = None
+    pending_since = times[0]
+    labels = [current]
+    for i in range(1, len(raw)):
+        proposal = raw[i]
+        if proposal == current:
+            pending = None
+        elif proposal != pending:
+            pending = proposal
+            pending_since = times[i]
+        elif times[i] - pending_since >= hold_sec:
+            current = proposal
+            pending = None
+        labels.append(current)
+    return labels
+
+
 def labels_to_segments(
     rows: list[dict],
     labels: list[str],
@@ -347,6 +419,9 @@ def demote_sandwich_fast(
     speeds: dict[str, float],
     require_high_struct_neighbors: bool = True,
     neighbor_edge_min: float | None = None,
+    move_dur_factor: float = 0.75,
+    keep_wall_edge_max: float = 0.04,
+    keep_wall_min_sec: float = 1.5,
 ) -> list[dict]:
     """
     room — digression (fast, optionally short move) — room → flatten to room.
@@ -363,6 +438,9 @@ def demote_sandwich_fast(
         if neighbor_edge_min is not None
         else max(0.10, float(content_struct_min) - 0.02)
     )
+    move_factor = float(move_dur_factor)
+    wall_edge = float(keep_wall_edge_max)
+    wall_min = float(keep_wall_min_sec)
     segs = [dict(s) for s in segs]
     changed = True
     while changed:
@@ -374,7 +452,7 @@ def demote_sandwich_fast(
             dur = float(cur["t1"]) - float(cur["t0"])
             # fast always; short move also (look-away walk)
             mid_ok = cur["kind"] == "fast" or (
-                cur["kind"] == "move" and dur <= max_fast_dur * 0.75
+                cur["kind"] == "move" and dur <= max_fast_dur * move_factor
             )
             if (
                 mid_ok
@@ -398,7 +476,7 @@ def demote_sandwich_fast(
                             rows, float(cur["t0"]), float(cur["t1"]), "edge"
                         )
                         # Keep true empty-wall fast between rooms if middle is flat
-                        if mid_e < 0.04 and dur >= 1.5:
+                        if mid_e < wall_edge and dur >= wall_min:
                             i += 1
                             continue
                     cur["kind"] = "room"
@@ -408,6 +486,54 @@ def demote_sandwich_fast(
                     break
             i += 1
     return coalesce_adjacent(segs)
+
+
+def apply_scene_aba_demote(
+    segs: list[dict],
+    rows: list[dict],
+    duration: float,
+    cfg: dict[str, Any],
+) -> list[dict]:
+    """
+    Demote digression middles detected by scene A→B→A (appearance / path return).
+
+    Pure low-edge walls stay fast so empty-wall dashes are not slowed.
+    User ``overrides`` applied later can still force any kind.
+    """
+    from .scene_aba import detect_scene_aba
+
+    aba = cfg.get("scene_aba") or {}
+    if not bool(aba.get("enabled", True)):
+        return segs
+    if not rows or not segs:
+        return segs
+    # Need fingerprints from analyze (cache v3 features). Graceful no-op otherwise.
+    if rows[0].get("appearance") is None and rows[0].get("fp") is None:
+        return segs
+
+    hits = detect_scene_aba(rows, cfg)
+    if not hits:
+        return segs
+
+    speeds = cfg["speeds"]
+    wall_edge = float(
+        aba.get(
+            "keep_wall_edge_max",
+            (cfg.get("segments") or {}).get("sandwich_keep_wall_edge_max", 0.04),
+        )
+    )
+    overrides: list[dict] = []
+    for hit in hits:
+        t0, t1 = float(hit["t0"]), float(hit["t1"])
+        if t1 <= t0 + 1e-9:
+            continue
+        mid_e = _segment_mean(rows, t0, t1, "edge")
+        if mid_e < wall_edge:
+            continue
+        overrides.append({"start": t0, "end": t1, "kind": "room"})
+    if not overrides:
+        return segs
+    return apply_overrides(segs, overrides, speeds, float(duration))
 
 
 def demote_long_structured_fast(
@@ -943,7 +1069,12 @@ def build_segments(
     cfg: dict[str, Any],
 ) -> list[dict]:
     """Full classify → merge → dual-gate post → override → room-hold ramp."""
-    labels = classify_frames(rows, cfg)
+    mode = str((cfg.get("algorithm") or {}).get("mode", "legacy")).lower()
+    labels = (
+        classify_frames_candidate(rows, cfg)
+        if mode == "candidate"
+        else classify_frames(rows, cfg)
+    )
     segs = labels_to_segments(rows, labels, duration, cfg)
     segs_cfg = cfg.get("segments") or {}
     segs = absorb_short_auto(segs, float(segs_cfg.get("min_duration", 0.4)))
@@ -965,18 +1096,23 @@ def build_segments(
             max(0.10, content_struct_min - 0.02),
         )
     )
-
-    # Drop false fast on content-rich pans
-    segs = demote_high_struct_fast(segs, rows, content_struct_min, speeds)
-    segs = demote_sandwich_fast(
-        segs,
-        rows,
+    sandwich_move_factor = float(segs_cfg.get("sandwich_move_dur_factor", 0.75))
+    sandwich_wall_edge = float(segs_cfg.get("sandwich_keep_wall_edge_max", 0.04))
+    sandwich_wall_min = float(segs_cfg.get("sandwich_keep_wall_min_sec", 1.5))
+    sandwich_kw = dict(
         content_struct_min=content_struct_min,
         max_fast_dur=sandwich_max,
         speeds=speeds,
         require_high_struct_neighbors=sandwich_need,
         neighbor_edge_min=sandwich_n_edge,
+        move_dur_factor=sandwich_move_factor,
+        keep_wall_edge_max=sandwich_wall_edge,
+        keep_wall_min_sec=sandwich_wall_min,
     )
+
+    # Drop false fast on content-rich pans
+    segs = demote_high_struct_fast(segs, rows, content_struct_min, speeds)
+    segs = demote_sandwich_fast(segs, rows, **sandwich_kw)
     # Low-edge flats left as room (high-std colored walls) → fast
     segs = promote_flat_rooms(segs, rows, cfg)
     # Lift mid-structure sustained rooms into corridor speeds
@@ -986,15 +1122,7 @@ def build_segments(
     segs = demote_long_structured_fast(segs, rows, cfg)
     # Second sandwich pass: catch living→bath→living digressions reintroduced
     # or slightly longer than the first pass threshold.
-    segs = demote_sandwich_fast(
-        segs,
-        rows,
-        content_struct_min=content_struct_min,
-        max_fast_dur=sandwich_max,
-        speeds=speeds,
-        require_high_struct_neighbors=sandwich_need,
-        neighbor_edge_min=sandwich_n_edge,
-    )
+    segs = demote_sandwich_fast(segs, rows, **sandwich_kw)
     # Remove short non-wall fast flickers
     segs = absorb_short_fast(
         segs,
@@ -1003,6 +1131,9 @@ def build_segments(
         wall_edge_max=wall_edge_max,
         speeds=speeds,
     )
+    segs = coalesce_adjacent(segs)
+    # Scene A→B→A (appearance / path return): demote digression middles to room
+    segs = apply_scene_aba_demote(segs, rows, duration, cfg)
     segs = coalesce_adjacent(segs)
 
     segs = apply_overrides(

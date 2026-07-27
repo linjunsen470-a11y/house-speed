@@ -2,14 +2,27 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import difflib
 import math
 from pathlib import Path
 from typing import Any
+import warnings
 
 import yaml
 
 # Built-in defaults (used when a key is missing from YAML)
 DEFAULTS: dict[str, Any] = {
+    "algorithm": {
+        # Candidate mode is deliberately opt-in until held-out videos pass.
+        "mode": "legacy",
+        "candidate": {
+            "low_information_max": 0.28,
+            "high_information_min": 0.64,
+            "move_motion_min": 0.34,
+            "fast_motion_min": 0.72,
+            "hysteresis_sec": 0.25,
+        },
+    },
     "io": {
         "output_suffix": "_edited",
         "work_dir": "frames",
@@ -60,9 +73,33 @@ DEFAULTS: dict[str, Any] = {
         "sandwich_demote_fast_max": 4.0,
         "sandwich_demote_need_high_struct": True,
         "sandwich_neighbor_edge_min": 0.10,
+        # Short move digressions count as sandwich if dur <= max * this factor
+        "sandwich_move_dur_factor": 0.75,
+        # Keep pure wall flashes as fast (do not demote to room)
+        "sandwich_keep_wall_edge_max": 0.04,
+        "sandwich_keep_wall_min_sec": 1.5,
         "corridor_promote_min_sec": 1.2,
         "structured_fast_demote_min_sec": 2.0,
         "structured_fast_demote_edge_min": 0.065,
+    },
+    # Scene digression A→B→A (local CV; needs analysis_features from analyze)
+    "scene_aba": {
+        "enabled": True,
+        "min_b_sec": 0.30,
+        "max_b_sec": 2.00,
+        "anchor_sec": 0.25,
+        "step_sec": 0.10,
+        "end_sim_min": 0.82,
+        "mid_sim_max": 0.62,
+        "min_mid_motion": 0.0,
+        "score_min": 0.35,
+        "use_flow_return": True,
+        "path_return_min": 0.42,
+        "flow_end_sim_min": 0.55,
+        "flow_min_mid_motion": 7.0,
+        "flow_score_min": 0.28,
+        "merge_gap_sec": 0.25,
+        "keep_wall_edge_max": 0.04,
     },
     "pacing": {
         "enabled": True,
@@ -162,6 +199,29 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+def _warn_unknown_keys(
+    data: dict[str, Any],
+    schema: dict[str, Any],
+    prefix: str = "",
+) -> None:
+    """Warn about likely YAML typos without breaking existing sidecars."""
+    for key, value in data.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if key not in schema:
+            choices = difflib.get_close_matches(str(key), [str(k) for k in schema], n=1)
+            hint = f"; did you mean {choices[0]!r}?" if choices else ""
+            warnings.warn(f"Unknown config key {path!r}{hint}", UserWarning, stacklevel=3)
+            continue
+        expected = schema[key]
+        if (
+            isinstance(value, dict)
+            and isinstance(expected, dict)
+            and expected
+            and key != "meta"
+        ):
+            _warn_unknown_keys(value, expected, path)
+
+
 def _deep_merge(base: dict, override: dict) -> dict:
     out = deepcopy(base)
     for k, v in (override or {}).items():
@@ -185,6 +245,7 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
         raise ValueError(f"Config root must be a mapping: {p}")
+    _warn_unknown_keys(data, DEFAULTS)
     cfg = _deep_merge(cfg, data)
     _validate(cfg)
     return cfg
@@ -199,6 +260,7 @@ def merge_config_file(cfg: dict[str, Any], path: str | Path) -> dict[str, Any]:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
         raise ValueError(f"Config root must be a mapping: {p}")
+    _warn_unknown_keys(data, DEFAULTS)
     merged = _deep_merge(cfg, data)
     _validate(merged)
     return merged
@@ -217,6 +279,40 @@ def _number(value: Any, name: str, *, minimum: float | None = None) -> float:
 
 
 def _validate(cfg: dict[str, Any]) -> None:
+    algorithm = cfg.get("algorithm") or {}
+    if not isinstance(algorithm, dict):
+        raise ValueError("algorithm must be a mapping")
+    mode = str(algorithm.get("mode") or "legacy").strip().lower()
+    if mode not in {"legacy", "candidate"}:
+        raise ValueError("algorithm.mode must be legacy|candidate")
+    candidate = algorithm.get("candidate") or {}
+    if not isinstance(candidate, dict):
+        raise ValueError("algorithm.candidate must be a mapping")
+    candidate_out: dict[str, float] = {}
+    for key, default in DEFAULTS["algorithm"]["candidate"].items():
+        candidate_out[key] = _number(
+            candidate.get(key, default),
+            f"algorithm.candidate.{key}",
+            minimum=0,
+        )
+    for key in (
+        "low_information_max",
+        "high_information_min",
+        "move_motion_min",
+        "fast_motion_min",
+    ):
+        if candidate_out[key] > 1:
+            raise ValueError(f"algorithm.candidate.{key} must be <= 1")
+    if candidate_out["high_information_min"] <= candidate_out["low_information_max"]:
+        raise ValueError(
+            "algorithm.candidate.high_information_min must exceed low_information_max"
+        )
+    if candidate_out["fast_motion_min"] <= candidate_out["move_motion_min"]:
+        raise ValueError(
+            "algorithm.candidate.fast_motion_min must exceed move_motion_min"
+        )
+    cfg["algorithm"] = {"mode": mode, "candidate": candidate_out}
+
     analysis = cfg["analysis"]
     for key in ("resize_width", "resize_height"):
         analysis[key] = int(_number(analysis[key], f"analysis.{key}", minimum=1))
@@ -335,6 +431,61 @@ def _validate(cfg: dict[str, Any]) -> None:
     segs["sandwich_demote_need_high_struct"] = bool(
         segs.get("sandwich_demote_need_high_struct", True)
     )
+    segs["sandwich_move_dur_factor"] = _number(
+        segs.get("sandwich_move_dur_factor", 0.75),
+        "segments.sandwich_move_dur_factor",
+        minimum=0,
+    )
+    if segs["sandwich_move_dur_factor"] > 1:
+        raise ValueError("segments.sandwich_move_dur_factor must be <= 1")
+    segs["sandwich_keep_wall_edge_max"] = _number(
+        segs.get("sandwich_keep_wall_edge_max", 0.04),
+        "segments.sandwich_keep_wall_edge_max",
+        minimum=0,
+    )
+    if segs["sandwich_keep_wall_edge_max"] > 1:
+        raise ValueError("segments.sandwich_keep_wall_edge_max must be <= 1")
+    segs["sandwich_keep_wall_min_sec"] = _number(
+        segs.get("sandwich_keep_wall_min_sec", 1.5),
+        "segments.sandwich_keep_wall_min_sec",
+        minimum=0,
+    )
+
+    # scene_aba: light validation; detector has its own defaults
+    scene_aba = cfg.get("scene_aba")
+    if scene_aba is None:
+        cfg["scene_aba"] = deepcopy(DEFAULTS["scene_aba"])
+    elif not isinstance(scene_aba, dict):
+        raise ValueError("scene_aba must be a mapping")
+    else:
+        merged_aba = _deep_merge(DEFAULTS["scene_aba"], scene_aba)
+        merged_aba["enabled"] = bool(merged_aba.get("enabled", True))
+        for key in (
+            "min_b_sec",
+            "max_b_sec",
+            "anchor_sec",
+            "step_sec",
+            "end_sim_min",
+            "mid_sim_max",
+            "min_mid_motion",
+            "score_min",
+            "path_return_min",
+            "flow_end_sim_min",
+            "flow_min_mid_motion",
+            "flow_score_min",
+            "merge_gap_sec",
+            "keep_wall_edge_max",
+        ):
+            if key in merged_aba:
+                merged_aba[key] = _number(
+                    merged_aba[key], f"scene_aba.{key}", minimum=0
+                )
+        merged_aba["use_flow_return"] = bool(merged_aba.get("use_flow_return", True))
+        if merged_aba["max_b_sec"] < merged_aba["min_b_sec"]:
+            raise ValueError("scene_aba.max_b_sec must be >= min_b_sec")
+        if merged_aba["keep_wall_edge_max"] > 1:
+            raise ValueError("scene_aba.keep_wall_edge_max must be <= 1")
+        cfg["scene_aba"] = merged_aba
 
     pacing = cfg.get("pacing") or {}
     ramp = list(pacing.get("room_hold_ramp") or [])

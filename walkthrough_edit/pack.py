@@ -1023,6 +1023,9 @@ def pack_video(
     output_path = Path(output_path)
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+    # FFmpeg creates the temporary output beside the final file, so the
+    # destination directory must exist before the process starts.
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     pack = cfg.get("pack") or {}
     assets = assets_root(cfg, project_root)
@@ -1320,7 +1323,6 @@ def pack_video(
         out_dur = probe_duration(temporary)
         if out_dur <= 0:
             raise RuntimeError("pack produced empty output")
-        output_path.parent.mkdir(parents=True, exist_ok=True)
         _replace_with_retry(temporary, output_path)
         succeeded = True
     finally:

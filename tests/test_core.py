@@ -6,9 +6,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
+
 from evaluate_segments import evaluate
 from walkthrough_edit.classify import (
     absorb_short_auto,
+    apply_scene_aba_demote,
     apply_static_hold_boost,
     build_segments,
     classify_frames,
@@ -35,6 +38,7 @@ from walkthrough_edit.render import (
     estimate_output_duration,
     select_video_codec,
 )
+from walkthrough_edit.scene_aba import fingerprint_gray
 from walkthrough_edit.text_styles import get_style, list_styles
 
 
@@ -295,6 +299,61 @@ class DualGateClassifyTests(unittest.TestCase):
             any(float(s["speed"]) >= 2.7 - 1e-6 for s in out),
             out,
         )
+
+    def test_scene_aba_demotes_digression_middle(self):
+        """Appearance A→B→A forces digression middle off fast (local CV path)."""
+        cfg = load_config(None)
+        cfg["pacing"]["enabled"] = False
+        cfg["pacing"]["static_boost_enabled"] = False
+        cfg["scene_aba"]["enabled"] = True
+        cfg["scene_aba"]["use_flow_return"] = False
+        # Distinct scene fingerprints: A bright, B dark
+        fp_a = fingerprint_gray(np.full((64, 64), 200.0, dtype=np.float32))
+        fp_b = fingerprint_gray(np.full((64, 64), 30.0, dtype=np.float32))
+        fps = 20.0
+        rows: list[dict] = []
+        # 0–1s A, 1–2s B digression, 2–3s A
+        for i in range(int(3 * fps)):
+            t = i / fps
+            if 1.0 <= t < 2.0:
+                fp, motion, edge = fp_b, 12.0, 0.09
+            else:
+                fp, motion, edge = fp_a, 6.0, 0.14
+            rows.append(
+                {
+                    "idx": i,
+                    "t": t,
+                    "mean": 100.0,
+                    "std": 50.0,
+                    "edge": edge,
+                    "motion": motion,
+                    "appearance": fp,
+                    "flow_dx": 0.0,
+                    "flow_dy": 0.0,
+                }
+            )
+        speeds = cfg["speeds"]
+        segs = [
+            segment(0.0, 1.0, "room", speeds["room"]),
+            segment(1.0, 2.0, "fast", speeds["fast"]),
+            segment(2.0, 3.0, "room", speeds["room"]),
+        ]
+        out = apply_scene_aba_demote(segs, rows, 3.0, cfg)
+        mid = [s for s in out if s["t0"] < 1.5 < s["t1"] or abs(s["t0"] - 1.0) < 0.05]
+        self.assertTrue(mid, out)
+        self.assertTrue(all(s["kind"] == "room" for s in mid), out)
+
+    def test_scene_aba_skips_without_appearance(self):
+        """No fingerprint → no-op (old caches / unit rows)."""
+        cfg = load_config(None)
+        segs = [
+            segment(0.0, 1.0, "room", 1.35),
+            segment(1.0, 2.0, "fast", 3.5),
+            segment(2.0, 3.0, "room", 1.35),
+        ]
+        rows = self._rows([(10.0, 0.1, 50.0)] * 90)
+        out = apply_scene_aba_demote(segs, rows, 3.0, cfg)
+        self.assertEqual([s["kind"] for s in out], ["room", "fast", "room"])
 
 
 class ConfigAndCliTests(unittest.TestCase):

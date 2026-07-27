@@ -13,11 +13,19 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.hypothesis/
 
 # --- IDE / OS ---
 .idea/
 .vscode/
+.agents/
 *.swp
+*.swo
+*.bak
+*.tmp
 .DS_Store
 Thumbs.db
 desktop.ini

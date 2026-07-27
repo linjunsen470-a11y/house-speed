@@ -1,6 +1,9 @@
 # =============================================================================
 # 房产带看视频 · 自动变速剪辑配置
-# 原则：不删除任何片段；房间实景原速；转角/空墙/过渡加速
+# 原则：不删除任何片段；转角/空墙/过渡加速；本地 CV（无云端 LLM）
+# 默认速度（Agent 调参请先读这里）：
+#   room 1.35× | move 2.65× | fast 3.5×（产品侧 fast 建议 ≥ 3.0）
+#   room 段还可经 hold ramp / 近静止 boost 再提速（不是全程 1×）
 # 用法：python edit_speed.py 2.mp4
 #       python edit_speed.py 2.mp4 -c config.yaml -o out.mp4
 # =============================================================================
@@ -18,6 +21,17 @@ io:
 
 cache:
   enabled: true
+
+# --- 算法模式 --------------------------------------------------------------------
+# legacy 是当前生产路径；candidate 仅用于离线 A/B，未通过独立素材验收前不要设为默认。
+algorithm:
+  mode: "legacy"  # legacy | candidate
+  candidate:
+    low_information_max: 0.28
+    high_information_min: 0.64
+    move_motion_min: 0.34
+    fast_motion_min: 0.72
+    hysteresis_sec: 0.25
 
 # --- 运动 / 结构分析 -----------------------------------------------------------
 analysis:
@@ -101,6 +115,20 @@ segments:
   # 长 fast 且段均 edge 仍高 → 降为 move（过道误 3×，如 2a 18–27s）
   structured_fast_demote_min_sec: 2.0
   structured_fast_demote_edge_min: 0.065
+  # 夹心否决细节（原硬编码，供 Agent 调参）
+  sandwich_move_dur_factor: 0.75       # short move 也算夹心：dur <= max * factor
+  sandwich_keep_wall_edge_max: 0.04   # 中段 edge 更低且够长 → 保留 fast（真空墙）
+  sandwich_keep_wall_min_sec: 1.5
+
+# --- 场景离题 A→B→A（本地外观指纹 + 相位相关光流，无 LLM）----------------------
+# 检出「两端像同一处、中间像别处」的扫视中段 → 压回 room，避免 3× 甩镜
+# 纯低 edge 墙面不会被压（keep_wall_edge_max）
+# 关掉：scene_aba.enabled: false
+scene_aba:
+  enabled: true
+  min_b_sec: 0.30
+  max_b_sec: 2.00
+  keep_wall_edge_max: 0.04
 
 # --- 方案 A：实景停留衰减（room hold ramp）-------------------------------------
 # 连续 room 段内按「已停留时长」分段提速，压缩同一空间过久停留，仍不删帧。
