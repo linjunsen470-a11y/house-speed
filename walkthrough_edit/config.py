@@ -50,9 +50,9 @@ DEFAULTS: dict[str, Any] = {
         "scenic_edge_min": 0.16,
     },
     "speeds": {
-        "room": 1.2,
-        "move": 2.4,
-        "fast": 3.2,
+        "room": 1.35,
+        "move": 2.65,
+        "fast": 3.5,
     },
     "segments": {
         "min_duration": 0.45,
@@ -69,11 +69,16 @@ DEFAULTS: dict[str, Any] = {
         "scenic_skip_hold_ramp": True,
         "scenic_skip_edge_min": 0.115,
         "static_hold_motion_max": 7.0,
+        "static_boost_enabled": True,
+        "static_motion_max": 4.5,
+        "static_min_sec": 0.7,
+        "static_boost_speed": 2.7,
+        "static_absorb_sec": 0.35,
         "room_hold_ramp": [
-            {"after": 0.0, "speed": 1.2},
-            {"after": 3.0, "speed": 1.5},
-            {"after": 6.0, "speed": 2.0},
-            {"after": 9.0, "speed": 2.6},
+            {"after": 0.0, "speed": 1.35},
+            {"after": 2.5, "speed": 1.7},
+            {"after": 5.0, "speed": 2.2},
+            {"after": 8.0, "speed": 2.7},
         ],
     },
     "overrides": [],
@@ -356,6 +361,29 @@ def _validate(cfg: dict[str, Any]) -> None:
     cfg["pacing"]["static_hold_motion_max"] = _number(
         pacing.get("static_hold_motion_max", 7.0),
         "pacing.static_hold_motion_max",
+        minimum=0,
+    )
+    cfg["pacing"]["static_boost_enabled"] = bool(
+        pacing.get("static_boost_enabled", True)
+    )
+    cfg["pacing"]["static_motion_max"] = _number(
+        pacing.get("static_motion_max", 4.5),
+        "pacing.static_motion_max",
+        minimum=0,
+    )
+    cfg["pacing"]["static_min_sec"] = _number(
+        pacing.get("static_min_sec", 0.7),
+        "pacing.static_min_sec",
+        minimum=0,
+    )
+    cfg["pacing"]["static_boost_speed"] = _number(
+        pacing.get("static_boost_speed", 2.7),
+        "pacing.static_boost_speed",
+        minimum=0.1,
+    )
+    cfg["pacing"]["static_absorb_sec"] = _number(
+        pacing.get("static_absorb_sec", 0.35),
+        "pacing.static_absorb_sec",
         minimum=0,
     )
 

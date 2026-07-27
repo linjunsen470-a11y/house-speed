@@ -680,18 +680,149 @@ def apply_room_hold_ramp(
             if rows is not None:
                 avg_e = _segment_mean_edge(rows, a, b)
                 avg_m = _segment_mean(rows, a, b, "motion")
-                # Dense structure stays 1x
-                if scenic_skip and avg_e >= scenic_skip_edge:
+                # Active pan: keep base room speed (avoid whip)
+                if avg_m > static_hold_motion_max:
                     speed = room_speed
-                # Active pan / walk mislabeled as room: do not ramp
-                elif avg_m > static_hold_motion_max:
+                # Scenic pan with real motion: keep base room speed
+                elif (
+                    scenic_skip
+                    and avg_e >= scenic_skip_edge
+                    and avg_m > float(pacing.get("static_motion_max", 4.5))
+                ):
                     speed = room_speed
+                # else: static / near-static hold — apply dwell ramp even with furniture
             piece = {
                 "t0": a,
                 "t1": b,
                 "kind": "room",
                 "speed": float(speed),
             }
+            if out and _same_play(out[-1], piece):
+                out[-1]["t1"] = b
+            else:
+                out.append(piece)
+    return out
+
+
+def apply_static_hold_boost(
+    segs: list[dict],
+    rows: list[dict] | None,
+    cfg: dict[str, Any],
+) -> list[dict]:
+    """
+    Detect near-static camera holds and raise playback speed.
+
+    Splits room segments into static vs live sub-ranges using smoothed motion.
+    Static islands (>= min sec) get at least ``static_boost_speed`` so idle
+    frames do not drag the cut.
+    """
+    if not segs or not rows:
+        return segs
+    pacing = cfg.get("pacing") or {}
+    if not bool(pacing.get("static_boost_enabled", True)):
+        return segs
+
+    thr = float(pacing.get("static_motion_max", 4.5))
+    min_sec = float(pacing.get("static_min_sec", 0.7))
+    boost = float(pacing.get("static_boost_speed", 2.6))
+    absorb = float(pacing.get("static_absorb_sec", 0.35))
+    k = int(cfg.get("analysis", {}).get("smooth_window", 7))
+
+    times = np.array([float(r["t"]) for r in rows], dtype=float)
+    motion = smooth(np.array([float(r["motion"]) for r in rows], dtype=float), k)
+    if len(times) == 0:
+        return segs
+
+    speeds = cfg["speeds"]
+    out: list[dict] = []
+
+    def _idx_at(t: float) -> int:
+        return int(np.clip(np.searchsorted(times, t, side="left"), 0, len(times) - 1))
+
+    for seg in segs:
+        item = dict(seg)
+        # Only boost informative room holds; walls already fast
+        if item["kind"] != "room":
+            out.append(item)
+            continue
+
+        t0, t1 = float(item["t0"]), float(item["t1"])
+        i0, i1 = _idx_at(t0), _idx_at(max(t0, t1 - 1e-6))
+        if i1 < i0:
+            i1 = i0
+        # Build static mask on frames overlapping segment
+        flags: list[bool] = []
+        frame_ts: list[float] = []
+        for i in range(i0, min(i1 + 1, len(times))):
+            if times[i] < t0 - 1e-9 or times[i] >= t1 - 1e-12:
+                if times[i] > t1 + 1e-6:
+                    break
+                if times[i] < t0:
+                    continue
+            flags.append(float(motion[i]) < thr)
+            frame_ts.append(float(times[i]))
+        if len(flags) < 2:
+            # Whole-segment mean fallback
+            mean_m = _segment_mean(rows, t0, t1, "motion")
+            if mean_m < thr and (t1 - t0) >= min_sec:
+                item["speed"] = max(float(item["speed"]), boost)
+            out.append(item)
+            continue
+
+        # Merge short islands in flag stream
+        merged: list[tuple[float, float, bool]] = []
+        run_static = flags[0]
+        run_t0 = max(t0, frame_ts[0])
+        for j in range(1, len(flags)):
+            if flags[j] != run_static:
+                run_t1 = frame_ts[j]
+                if run_t1 > run_t0 + 1e-9:
+                    merged.append((run_t0, run_t1, run_static))
+                run_t0 = run_t1
+                run_static = flags[j]
+        if t1 > run_t0 + 1e-9:
+            merged.append((run_t0, t1, run_static))
+
+        # Absorb tiny islands
+        if absorb > 0 and len(merged) > 1:
+            changed = True
+            while changed and len(merged) > 1:
+                changed = False
+                for j, (a, b, st) in enumerate(merged):
+                    if b - a >= absorb:
+                        continue
+                    if j == 0:
+                        merged[1] = (a, merged[1][1], merged[1][2])
+                    elif j == len(merged) - 1:
+                        merged[j - 1] = (merged[j - 1][0], b, merged[j - 1][2])
+                    else:
+                        # merge into longer neighbor
+                        left_d = merged[j - 1][1] - merged[j - 1][0]
+                        right_d = merged[j + 1][1] - merged[j + 1][0]
+                        if left_d >= right_d:
+                            merged[j - 1] = (merged[j - 1][0], b, merged[j - 1][2])
+                        else:
+                            merged[j + 1] = (a, merged[j + 1][1], merged[j + 1][2])
+                    merged.pop(j)
+                    changed = True
+                    break
+            # coalesce same flags
+            coalesced: list[tuple[float, float, bool]] = []
+            for a, b, st in merged:
+                if coalesced and coalesced[-1][2] == st:
+                    coalesced[-1] = (coalesced[-1][0], b, st)
+                else:
+                    coalesced.append((a, b, st))
+            merged = coalesced
+
+        base = float(item.get("speed", speeds["room"]))
+        for a, b, is_static in merged:
+            if b <= a + 1e-9:
+                continue
+            sp = base
+            if is_static and (b - a) >= min_sec:
+                sp = max(base, boost)
+            piece = {"t0": a, "t1": b, "kind": "room", "speed": float(sp)}
             if out and _same_play(out[-1], piece):
                 out[-1]["t1"] = b
             else:
@@ -884,5 +1015,8 @@ def build_segments(
     for s in segs:
         s["speed"] = float(speeds[s["kind"]])
     segs = apply_room_hold_ramp(segs, cfg, rows=rows)
+    segs = coalesce_adjacent(segs)
+    # Near-static camera holds → extra speed (idle frames)
+    segs = apply_static_hold_boost(segs, rows, cfg)
     segs = coalesce_adjacent(segs)
     return normalize_timeline(segs, duration)

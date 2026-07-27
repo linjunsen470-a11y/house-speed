@@ -9,6 +9,7 @@ from unittest.mock import patch
 from evaluate_segments import evaluate
 from walkthrough_edit.classify import (
     absorb_short_auto,
+    apply_static_hold_boost,
     build_segments,
     classify_frames,
     demote_sandwich_fast,
@@ -93,6 +94,7 @@ class SegmentTests(unittest.TestCase):
     def test_override_outside_duration_is_clipped_away(self):
         cfg = load_config(None)
         cfg["pacing"]["enabled"] = False
+        cfg["pacing"]["static_boost_enabled"] = False
         cfg["overrides"] = [{"start": 2, "end": 3, "kind": "fast"}]
         rows = [
             {"idx": i, "t": i / 30, "mean": 100, "std": 50, "edge": 0.1, "motion": 0}
@@ -275,6 +277,24 @@ class DualGateClassifyTests(unittest.TestCase):
     def test_default_fast_speed_is_at_least_three(self):
         cfg = load_config(None)
         self.assertGreaterEqual(float(cfg["speeds"]["fast"]), 3.0)
+
+    def test_static_hold_boost_raises_speed(self):
+        """Near-zero motion room holds get boosted past base room speed."""
+        cfg = load_config(None)
+        cfg["pacing"]["enabled"] = True
+        cfg["pacing"]["static_boost_enabled"] = True
+        cfg["pacing"]["static_motion_max"] = 4.5
+        cfg["pacing"]["static_min_sec"] = 0.5
+        cfg["pacing"]["static_boost_speed"] = 2.7
+        n = 60  # 2s at 30fps
+        rows = self._rows([(1.0, 0.12, 50.0)] * n)  # very low motion, high edge
+        segs = [{"t0": 0.0, "t1": 2.0, "kind": "room", "speed": float(cfg["speeds"]["room"])}]
+        out = apply_static_hold_boost(segs, rows, cfg)
+        self.assertTrue(out)
+        self.assertTrue(
+            any(float(s["speed"]) >= 2.7 - 1e-6 for s in out),
+            out,
+        )
 
 
 class ConfigAndCliTests(unittest.TestCase):

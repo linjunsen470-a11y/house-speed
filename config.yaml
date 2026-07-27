@@ -79,11 +79,11 @@ classify:
 
 # --- 各类速度倍率（>1 为加速；1 为原速）---------------------------------------
 # 注意：不会丢弃任何时间段，只改变播放速度
-# 微提速：room 1.2 起，减轻拖沓，目标成片更接近 90～110s 量级（视素材而定）
+# 再提速一档：目标成片更接近 90～100s
 speeds:
-  room: 1.2    # 有意义实景轻提速
-  move: 2.4    # 走廊过渡
-  fast: 3.2    # 转角 / 空墙 / 急转（≥3.0）
+  room: 1.35   # 有意义实景
+  move: 2.65   # 走廊过渡
+  fast: 3.5    # 转角 / 空墙 / 急转
 
 # --- 分段后处理 ---------------------------------------------------------------
 segments:
@@ -110,16 +110,23 @@ pacing:
   enabled: true
   scenic_skip_hold_ramp: true
   scenic_skip_edge_min: 0.115
+  # 平滑 motion 高于此值视为「镜头在动」：不做 dwell ramp（防甩）
   static_hold_motion_max: 7.0
+  # 近静止识别：motion 低于此值持续一段时间 → 强制提速
+  static_boost_enabled: true
+  static_motion_max: 4.5
+  static_min_sec: 0.7
+  static_boost_speed: 2.7
+  static_absorb_sec: 0.35
   room_hold_ramp:
     - after: 0.0
-      speed: 1.2    # 与 speeds.room 对齐，微提速起手
-    - after: 3.0
-      speed: 1.5    # 稍早开始压停留
-    - after: 6.0
-      speed: 2.0
-    - after: 9.0
-      speed: 2.6    # 长停留再压（略低于旧 2.8，减少甩感）
+      speed: 1.35
+    - after: 2.5
+      speed: 1.7
+    - after: 5.0
+      speed: 2.2
+    - after: 8.0
+      speed: 2.7
 
 # --- 人工覆盖（可选）-----------------------------------------------------------
 # 在自动分段之后，按时间强制指定 kind（room|move|fast）。
