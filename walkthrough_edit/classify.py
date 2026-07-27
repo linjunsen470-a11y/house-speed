@@ -389,6 +389,40 @@ def demote_sandwich_fast(
     return coalesce_adjacent(segs)
 
 
+def demote_long_structured_fast(
+    segs: list[dict],
+    rows: list[dict],
+    cfg: dict[str, Any],
+) -> list[dict]:
+    """
+    Long fast segments that still have mid/high structure are usually corridors
+    walked too quickly — demote to move (2.2x) instead of 3.0x whip.
+    """
+    if not segs or not rows:
+        return segs
+    c = cfg["classify"]
+    speeds = cfg["speeds"]
+    segs_cfg = cfg.get("segments") or {}
+    min_sec = float(segs_cfg.get("structured_fast_demote_min_sec", 2.0))
+    edge_min = float(
+        segs_cfg.get(
+            "structured_fast_demote_edge_min",
+            max(0.08, float(c.get("corridor_struct_hi", 0.11)) * 0.75),
+        )
+    )
+    out: list[dict] = []
+    for seg in segs:
+        item = dict(seg)
+        dur = float(item["t1"]) - float(item["t0"])
+        if item["kind"] == "fast" and dur + 1e-9 >= min_sec:
+            mean_e = _segment_mean(rows, float(item["t0"]), float(item["t1"]), "edge")
+            if mean_e >= edge_min:
+                item["kind"] = "move"
+                item["speed"] = float(speeds["move"])
+        out.append(item)
+    return coalesce_adjacent(out)
+
+
 def promote_flat_rooms(
     segs: list[dict],
     rows: list[dict],
@@ -779,6 +813,9 @@ def build_segments(
     segs = promote_flat_rooms(segs, rows, cfg)
     # Lift mid-structure sustained rooms into corridor speeds
     segs = promote_corridor_rooms(segs, rows, cfg)
+    # After promote: long high-structure "fast" → move (corridor walking ≠ blank wall)
+    # Must run *after* promote_corridor so it cannot re-upgrade walking to 3x.
+    segs = demote_long_structured_fast(segs, rows, cfg)
     # Remove short non-wall fast flickers
     segs = absorb_short_fast(
         segs,

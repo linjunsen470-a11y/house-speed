@@ -37,14 +37,14 @@ DEFAULTS: dict[str, Any] = {
         "transitional_edge_max": 0.090,
         # Dual-gate: high structure protects room pans; mid structure + walk = corridor
         "content_struct_min": 0.115,
-        "dash_struct_max": 0.055,
+        "dash_struct_max": 0.048,
         "walk_motion_lo": 6.5,
         "walk_motion_hi": 14.0,
         "corridor_struct_lo": 0.040,
         "corridor_struct_hi": 0.110,
         "corridor_sustain_sec": 0.8,
         "corridor_sustain_ratio": 0.65,
-        "corridor_fast_motion": 12.0,
+        "corridor_fast_motion": 14.5,
         "move_struct_max": 0.090,
         # Legacy alias; content_struct_min is the primary protect threshold
         "scenic_edge_min": 0.16,
@@ -56,10 +56,12 @@ DEFAULTS: dict[str, Any] = {
     },
     "segments": {
         "min_duration": 0.45,
-        "min_fast_duration": 0.9,
-        "sandwich_demote_fast_max": 2.5,
+        "min_fast_duration": 1.2,
+        "sandwich_demote_fast_max": 3.0,
         "sandwich_demote_need_high_struct": True,
         "corridor_promote_min_sec": 1.2,
+        "structured_fast_demote_min_sec": 2.0,
+        "structured_fast_demote_edge_min": 0.08,
     },
     "pacing": {
         "enabled": True,
@@ -305,6 +307,18 @@ def _validate(cfg: dict[str, Any]) -> None:
         "segments.corridor_promote_min_sec",
         minimum=0,
     )
+    segs["structured_fast_demote_min_sec"] = _number(
+        segs.get("structured_fast_demote_min_sec", 2.0),
+        "segments.structured_fast_demote_min_sec",
+        minimum=0,
+    )
+    segs["structured_fast_demote_edge_min"] = _number(
+        segs.get("structured_fast_demote_edge_min", 0.08),
+        "segments.structured_fast_demote_edge_min",
+        minimum=0,
+    )
+    if segs["structured_fast_demote_edge_min"] > 1:
+        raise ValueError("segments.structured_fast_demote_edge_min must be <= 1")
     segs["sandwich_demote_need_high_struct"] = bool(
         segs.get("sandwich_demote_need_high_struct", True)
     )
