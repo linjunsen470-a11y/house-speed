@@ -39,13 +39,40 @@ def _segment_percentile(
     return float(np.percentile(vals, q * 100.0))
 
 
+def is_flat_surface(
+    edge: float,
+    std: float,
+    *,
+    wall_edge_max: float,
+    wall_std_max: float,
+    flat_edge_soft: float | None = None,
+) -> bool:
+    """
+    Color-agnostic low-information / flat surface (painted wall any color, door).
+
+    Edge density is the primary cue. Do **not** require low luminance or
+    low global std: soft shadows and paint grain often raise std while the
+    frame is still an uninformative wall.
+    """
+    e = float(edge)
+    s = float(std)
+    # Strict low-edge: always flat (fixes high-std colored walls)
+    if e < wall_edge_max:
+        return True
+    # Soft band: slightly more edge only if contrast stays low
+    soft = float(flat_edge_soft) if flat_edge_soft is not None else wall_edge_max * 1.4
+    if e < soft and s < wall_std_max:
+        return True
+    return False
+
+
 def classify_frames(rows: list[dict], cfg: dict[str, Any]) -> list[str]:
     """
     Per-frame label with dual-gate logic:
 
       room  – high-structure holds / content pans (keep ~1x)
       move  – corridor / mid-structure sustained walk
-      fast  – blank walls / low-structure dashes / fast corridor
+      fast  – flat walls / low-structure dashes / fast corridor
 
     High structure always blocks fast (protect living rooms / bedrooms).
     Mid structure + sustained walk promotes move/fast (corridors).
@@ -63,6 +90,7 @@ def classify_frames(rows: list[dict], cfg: dict[str, Any]) -> list[str]:
 
     wall_edge_max = float(c["wall_edge_max"])
     wall_std_max = float(c["wall_std_max"])
+    flat_edge_soft = float(c.get("flat_edge_soft", wall_edge_max * 1.4))
     very_fast_motion = float(c["very_fast_motion"])
     transitional_motion = float(c["transitional_motion"])
 
@@ -83,16 +111,25 @@ def classify_frames(rows: list[dict], cfg: dict[str, Any]) -> list[str]:
     # High structure (indoor furniture / outdoor scenic) never goes to fast.
     protect_struct_min = content_struct_min
 
+    def _flat(e: float, s: float) -> bool:
+        return is_flat_surface(
+            e,
+            s,
+            wall_edge_max=wall_edge_max,
+            wall_std_max=wall_std_max,
+            flat_edge_soft=flat_edge_soft,
+        )
+
     # Pre-compute walk-like frames for sustain windows
     walk_like = np.zeros(n, dtype=bool)
     for i in range(n):
         m = float(motion[i])
         e = float(edge[i])
         s = float(std[i])
-        wall = e < wall_edge_max and s < wall_std_max
+        flat = _flat(e, s)
         mid_struct = corridor_struct_lo <= e <= corridor_struct_hi
         # Sustained walk band, or faster walk still in mid-structure corridor
-        if wall:
+        if flat:
             walk_like[i] = False
         elif mid_struct and m >= walk_motion_lo:
             walk_like[i] = True
@@ -108,10 +145,9 @@ def classify_frames(rows: list[dict], cfg: dict[str, Any]) -> list[str]:
         m = float(motion[i])
         e = float(edge[i])
         s = float(std[i])
-        wall = e < wall_edge_max and s < wall_std_max
 
-        # --- D1: blank wall / door panel ---
-        if wall:
+        # --- D1: flat / low-info surface (any wall color; edge-primary) ---
+        if _flat(e, s):
             labels.append("fast")
             continue
 
@@ -351,6 +387,40 @@ def demote_sandwich_fast(
                     break
             i += 1
     return coalesce_adjacent(segs)
+
+
+def promote_flat_rooms(
+    segs: list[dict],
+    rows: list[dict],
+    cfg: dict[str, Any],
+) -> list[dict]:
+    """
+    Promote room segments that are still low-edge flats (any wall color) to fast.
+
+    Catches islands the frame smoother / neighbor absorb may leave as room
+    when std is high from shadows but edge stays wall-like.
+    """
+    if not segs or not rows:
+        return segs
+    c = cfg["classify"]
+    speeds = cfg["speeds"]
+    wall_edge_max = float(c["wall_edge_max"])
+    # Allow slightly above frame threshold after temporal averaging
+    edge_cap = float(c.get("flat_promote_edge_max", wall_edge_max * 1.15))
+    out: list[dict] = []
+    for seg in segs:
+        item = dict(seg)
+        if item["kind"] == "room":
+            mean_e = _segment_mean(rows, float(item["t0"]), float(item["t1"]), "edge")
+            # p80 edge still low → whole segment is flat, not a brief wall flash
+            p80_e = _segment_percentile(
+                rows, float(item["t0"]), float(item["t1"]), "edge", 0.8
+            )
+            if mean_e < edge_cap and p80_e < edge_cap * 1.25:
+                item["kind"] = "fast"
+                item["speed"] = float(speeds["fast"])
+        out.append(item)
+    return coalesce_adjacent(out)
 
 
 def promote_corridor_rooms(
@@ -705,6 +775,8 @@ def build_segments(
             segs_cfg.get("sandwich_demote_need_high_struct", True)
         ),
     )
+    # Low-edge flats left as room (high-std colored walls) → fast
+    segs = promote_flat_rooms(segs, rows, cfg)
     # Lift mid-structure sustained rooms into corridor speeds
     segs = promote_corridor_rooms(segs, rows, cfg)
     # Remove short non-wall fast flickers

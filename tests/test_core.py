@@ -12,9 +12,11 @@ from walkthrough_edit.classify import (
     build_segments,
     classify_frames,
     demote_sandwich_fast,
+    is_flat_surface,
     labels_to_segments,
     normalize_timeline,
     promote_corridor_rooms,
+    promote_flat_rooms,
     validate_timeline,
 )
 from walkthrough_edit.config import load_config
@@ -168,6 +170,34 @@ class DualGateClassifyTests(unittest.TestCase):
         rows = self._rows([(4.0, 0.02, 20.0)] * n)
         labels = classify_frames(rows, cfg)
         self.assertTrue(all(lb == "fast" for lb in labels))
+
+    def test_high_std_colored_wall_is_still_fast(self):
+        """
+        Painted / shadowed walls: low edge but elevated std must not stay room.
+        Regression for -1a ~7.5–9.8s style flats.
+        """
+        cfg = load_config(None)
+        cfg["pacing"]["enabled"] = False
+        # edge 0.028 < wall_edge_max 0.035, std 52 > wall_std_max 45
+        n = 45
+        rows = self._rows([(6.5, 0.028, 52.0)] * n)
+        labels = classify_frames(rows, cfg)
+        self.assertTrue(
+            all(lb == "fast" for lb in labels),
+            f"expected flat wall→fast, got {set(labels)}",
+        )
+        segs = build_segments(rows, n / 30.0, cfg)
+        self.assertTrue(all(s["kind"] == "fast" for s in segs), segs)
+        self.assertTrue(is_flat_surface(0.028, 52.0, wall_edge_max=0.035, wall_std_max=45.0))
+        self.assertFalse(is_flat_surface(0.08, 52.0, wall_edge_max=0.035, wall_std_max=45.0))
+
+    def test_promote_flat_room_segment(self):
+        cfg = load_config(None)
+        n = 30
+        rows = self._rows([(5.0, 0.025, 55.0)] * n)
+        segs = [{"t0": 0.0, "t1": 1.0, "kind": "room", "speed": 1.0}]
+        out = promote_flat_rooms(segs, rows, cfg)
+        self.assertEqual(out[0]["kind"], "fast")
 
     def test_low_struct_dash_is_fast(self):
         cfg = load_config(None)

@@ -43,9 +43,13 @@ analysis:
 #   transitional 兜底 → move
 #   其余 → room
 classify:
-  # 白墙 / 门板 / 过曝空镜：边缘少 + 对比度低
+  # 低信息平面（任意颜色墙/门板）：以 edge 为主，不要求“白”或低 std
+  # edge < wall_edge_max → 直接 fast（阴影/漆面颗粒会抬高 std，旧逻辑会漏）
+  # edge 略高但仍低且 std 低 → 软判定 flat
   wall_edge_max: 0.035
   wall_std_max: 45.0
+  flat_edge_soft: 0.049          # ≈ wall_edge_max * 1.4
+  flat_promote_edge_max: 0.040   # 段级：整段 mean edge 仍低则 room→fast
 
   # 急转 / 快速穿行：平滑后的帧差均值（须同时结构低才进 fast）
   very_fast_motion: 15.0

@@ -30,6 +30,8 @@ DEFAULTS: dict[str, Any] = {
     "classify": {
         "wall_edge_max": 0.035,
         "wall_std_max": 45.0,
+        "flat_edge_soft": 0.049,
+        "flat_promote_edge_max": 0.040,
         "very_fast_motion": 15.0,
         "transitional_motion": 9.0,
         "transitional_edge_max": 0.090,
