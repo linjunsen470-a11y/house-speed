@@ -30,23 +30,40 @@ DEFAULTS: dict[str, Any] = {
     "classify": {
         "wall_edge_max": 0.035,
         "wall_std_max": 45.0,
-        "very_fast_motion": 14.0,
-        "transitional_motion": 10.5,
-        "transitional_edge_max": 0.055,
+        "very_fast_motion": 15.0,
+        "transitional_motion": 9.0,
+        "transitional_edge_max": 0.090,
+        # Dual-gate: high structure protects room pans; mid structure + walk = corridor
+        "content_struct_min": 0.115,
+        "dash_struct_max": 0.055,
+        "walk_motion_lo": 6.5,
+        "walk_motion_hi": 14.0,
+        "corridor_struct_lo": 0.040,
+        "corridor_struct_hi": 0.110,
+        "corridor_sustain_sec": 0.8,
+        "corridor_sustain_ratio": 0.65,
+        "corridor_fast_motion": 12.0,
+        "move_struct_max": 0.090,
+        # Legacy alias; content_struct_min is the primary protect threshold
         "scenic_edge_min": 0.16,
     },
     "speeds": {
         "room": 1.0,
         "move": 2.2,
-        "fast": 3.5,
+        "fast": 3.0,
     },
     "segments": {
-        "min_duration": 0.40,
+        "min_duration": 0.45,
+        "min_fast_duration": 0.9,
+        "sandwich_demote_fast_max": 2.5,
+        "sandwich_demote_need_high_struct": True,
+        "corridor_promote_min_sec": 1.2,
     },
     "pacing": {
         "enabled": True,
         "scenic_skip_hold_ramp": True,
-        "scenic_skip_edge_min": 0.18,
+        "scenic_skip_edge_min": 0.115,
+        "static_hold_motion_max": 7.0,
         "room_hold_ramp": [
             {"after": 0.0, "speed": 1.0},
             {"after": 4.0, "speed": 1.5},
@@ -212,20 +229,82 @@ def _validate(cfg: dict[str, Any]) -> None:
     analysis["smooth_window"] = sw if sw % 2 else sw + 1
 
     classify = cfg["classify"]
-    for key in ("wall_edge_max", "transitional_edge_max", "scenic_edge_min"):
+    for key in (
+        "wall_edge_max",
+        "transitional_edge_max",
+        "scenic_edge_min",
+        "content_struct_min",
+        "dash_struct_max",
+        "corridor_struct_lo",
+        "corridor_struct_hi",
+        "move_struct_max",
+    ):
+        if key not in classify:
+            continue
         value = _number(classify[key], f"classify.{key}", minimum=0)
         if value > 1:
             raise ValueError(f"classify.{key} must be <= 1")
         classify[key] = value
+    # Ensure dual-gate keys exist even on older YAML
+    if "content_struct_min" not in classify:
+        classify["content_struct_min"] = float(classify.get("scenic_edge_min", 0.115))
+    if "dash_struct_max" not in classify:
+        classify["dash_struct_max"] = 0.055
+    if "move_struct_max" not in classify:
+        classify["move_struct_max"] = float(
+            classify.get("transitional_edge_max", 0.090)
+        )
     wall_std = _number(classify["wall_std_max"], "classify.wall_std_max", minimum=0)
     if wall_std > 255:
         raise ValueError("classify.wall_std_max must be <= 255")
     classify["wall_std_max"] = wall_std
-    for key in ("very_fast_motion", "transitional_motion"):
+    for key in (
+        "very_fast_motion",
+        "transitional_motion",
+        "walk_motion_lo",
+        "walk_motion_hi",
+        "corridor_sustain_sec",
+        "corridor_sustain_ratio",
+        "corridor_fast_motion",
+    ):
+        if key not in classify:
+            continue
         classify[key] = _number(classify[key], f"classify.{key}", minimum=0)
+    for key, default in (
+        ("walk_motion_lo", 6.5),
+        ("walk_motion_hi", 14.0),
+        ("corridor_struct_lo", 0.040),
+        ("corridor_struct_hi", 0.110),
+        ("corridor_sustain_sec", 0.8),
+        ("corridor_sustain_ratio", 0.65),
+        ("corridor_fast_motion", 12.0),
+    ):
+        if key not in classify:
+            classify[key] = default
+    if classify["corridor_struct_hi"] < classify["corridor_struct_lo"]:
+        raise ValueError("classify.corridor_struct_hi must be >= corridor_struct_lo")
+    if classify["corridor_sustain_ratio"] > 1:
+        raise ValueError("classify.corridor_sustain_ratio must be <= 1")
 
-    cfg["segments"]["min_duration"] = _number(
-        cfg["segments"]["min_duration"], "segments.min_duration", minimum=0
+    segs = cfg.setdefault("segments", {})
+    segs["min_duration"] = _number(
+        segs.get("min_duration", 0.45), "segments.min_duration", minimum=0
+    )
+    segs["min_fast_duration"] = _number(
+        segs.get("min_fast_duration", 0.9), "segments.min_fast_duration", minimum=0
+    )
+    segs["sandwich_demote_fast_max"] = _number(
+        segs.get("sandwich_demote_fast_max", 2.5),
+        "segments.sandwich_demote_fast_max",
+        minimum=0,
+    )
+    segs["corridor_promote_min_sec"] = _number(
+        segs.get("corridor_promote_min_sec", 1.2),
+        "segments.corridor_promote_min_sec",
+        minimum=0,
+    )
+    segs["sandwich_demote_need_high_struct"] = bool(
+        segs.get("sandwich_demote_need_high_struct", True)
     )
 
     pacing = cfg.get("pacing") or {}
@@ -243,13 +322,18 @@ def _validate(cfg: dict[str, Any]) -> None:
             ramp, key=lambda s: float(s["after"])
         )
     scenic = _number(
-        pacing.get("scenic_skip_edge_min", 0.18),
+        pacing.get("scenic_skip_edge_min", 0.115),
         "pacing.scenic_skip_edge_min",
         minimum=0,
     )
     if scenic > 1:
         raise ValueError("pacing.scenic_skip_edge_min must be <= 1")
     cfg.setdefault("pacing", {})["scenic_skip_edge_min"] = scenic
+    cfg["pacing"]["static_hold_motion_max"] = _number(
+        pacing.get("static_hold_motion_max", 7.0),
+        "pacing.static_hold_motion_max",
+        minimum=0,
+    )
 
     for i, ov in enumerate(cfg.get("overrides") or []):
         if "start" not in ov or "end" not in ov or "kind" not in ov:

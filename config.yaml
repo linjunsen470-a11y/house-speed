@@ -31,27 +31,45 @@ analysis:
   smooth_window: 7
 
 # --- 分类阈值（决定 room / move / fast）---------------------------------------
+# 双门控：
+#   高结构（客厅/卧室/外景）→ 禁止 fast，保护扫景不甩镜
+#   中结构 + 持续行走 → move/fast，过道不再拖成 1×
+#   低结构急动 / 空墙 → fast ≥ 3.0×
 # 优先级大致为：
 #   纯空墙 wall → fast
-#   高速但结构丰富（阳台外景扫景）→ room（保护，不按 fast）
-#   高速且结构弱 → fast
-#   transitional → move
+#   edge ≥ content_struct_min → room（有内容保护）
+#   高 motion + 低结构 → fast（真 dash）
+#   中结构持续 walk → move 或 fast（过道）
+#   transitional 兜底 → move
 #   其余 → room
 classify:
   # 白墙 / 门板 / 过曝空镜：边缘少 + 对比度低
   wall_edge_max: 0.035
   wall_std_max: 45.0
 
-  # 急转 / 快速穿行：平滑后的帧差均值
-  very_fast_motion: 14.0
+  # 急转 / 快速穿行：平滑后的帧差均值（须同时结构低才进 fast）
+  very_fast_motion: 15.0
 
-  # 过渡行走：运动偏大且结构偏弱（房间内缓推通常 edge 较高，不会进这里）
-  transitional_motion: 10.5
-  transitional_edge_max: 0.055
+  # 过渡行走兜底（已放宽 edge，真正过道主要靠 corridor_*）
+  transitional_motion: 9.0
+  transitional_edge_max: 0.090
 
-  # 风景/外景保护：运动再大，只要边缘密度够高（楼群、树、天际线），
-  # 视为有意义扫景，保持 room，避免阳台外景被 3.5× 快进。
-  # 阈值宜高于一般室内（室内家具 edge 常在 0.05～0.14）
+  # 有内容保护：室内家具/外景扫景 edge 达到此值 → 永不 3×
+  content_struct_min: 0.115
+  # 仅当结构低于此值时，高 motion 才判 dash→fast
+  dash_struct_max: 0.055
+
+  # 过道带：中等结构 + 持续中等以上运动
+  walk_motion_lo: 6.5
+  walk_motion_hi: 14.0
+  corridor_struct_lo: 0.040
+  corridor_struct_hi: 0.110
+  corridor_sustain_sec: 0.8
+  corridor_sustain_ratio: 0.65
+  corridor_fast_motion: 12.0   # 过道内再升到 fast
+  move_struct_max: 0.090
+
+  # 兼容旧字段（外景保护；主保护阈值已是 content_struct_min）
   scenic_edge_min: 0.16
 
 # --- 各类速度倍率（>1 为加速；1 为原速）---------------------------------------
@@ -59,21 +77,29 @@ classify:
 speeds:
   room: 1.0    # 客厅 / 房间等有意义画面
   move: 2.2    # 走廊过渡行走
-  fast: 3.5    # 转角 / 空墙 / 急转
+  fast: 3.0    # 转角 / 空墙 / 急转 / 快过道（最低 3×）
 
 # --- 分段后处理 ---------------------------------------------------------------
 segments:
   # 短于该秒数的「孤岛」并入相邻段，减少闪切
-  min_duration: 0.40
+  min_duration: 0.45
+  # 非空墙的短 fast 并入邻段（抑制 1×↔3× 闪切）
+  min_fast_duration: 0.9
+  # room—短 fast—room 且两侧高结构 → 否决为 room（客厅误伤）
+  sandwich_demote_fast_max: 2.5
+  sandwich_demote_need_high_struct: true
+  # 长中结构 room + 持续行走 → 提升为 move/fast（过道漏判）
+  corridor_promote_min_sec: 1.2
 
 # --- 方案 A：实景停留衰减（room hold ramp）-------------------------------------
 # 连续 room 段内按「已停留时长」分段提速，压缩同一空间过久停留，仍不删帧。
 # after = 相对该 room 段起点的秒数；speed = 该区间播放倍率。
+# 高结构 / 相机仍在动的片段跳过衰减，避免扫景后半段被抬速甩镜。
 pacing:
   enabled: true
-  # 子段平均边缘 ≥ 该值时跳过停留衰减（可比 scenic_edge_min 略高，避免室内误免衰减）
   scenic_skip_hold_ramp: true
-  scenic_skip_edge_min: 0.18
+  scenic_skip_edge_min: 0.115
+  static_hold_motion_max: 7.0
   room_hold_ramp:
     - after: 0.0
       speed: 1.0    # 前几秒建立空间感

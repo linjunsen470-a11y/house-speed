@@ -8,52 +8,159 @@ import numpy as np
 from .analyze import smooth
 
 
+def _segment_frame_vals(
+    rows: list[dict], t0: float, t1: float, key: str
+) -> list[float]:
+    vals = [
+        float(r[key])
+        for r in rows
+        if t0 - 1e-9 <= float(r["t"]) < t1 - 1e-9
+    ]
+    if vals:
+        return vals
+    return [
+        float(r[key])
+        for r in rows
+        if t0 - 1e-9 <= float(r["t"]) <= t1 + 1e-9
+    ]
+
+
+def _segment_mean(rows: list[dict], t0: float, t1: float, key: str) -> float:
+    vals = _segment_frame_vals(rows, t0, t1, key)
+    return float(np.mean(vals)) if vals else 0.0
+
+
+def _segment_percentile(
+    rows: list[dict], t0: float, t1: float, key: str, q: float
+) -> float:
+    vals = _segment_frame_vals(rows, t0, t1, key)
+    if not vals:
+        return 0.0
+    return float(np.percentile(vals, q * 100.0))
+
+
 def classify_frames(rows: list[dict], cfg: dict[str, Any]) -> list[str]:
     """
-    Per-frame label:
-      room  – meaningful space / scenic pans (keep near original speed)
-      move  – transitional walk
-      fast  – corners / blank walls / low-structure dashes
+    Per-frame label with dual-gate logic:
+
+      room  – high-structure holds / content pans (keep ~1x)
+      move  – corridor / mid-structure sustained walk
+      fast  – blank walls / low-structure dashes / fast corridor
+
+    High structure always blocks fast (protect living rooms / bedrooms).
+    Mid structure + sustained walk promotes move/fast (corridors).
     """
     c = cfg["classify"]
     k = int(cfg["analysis"]["smooth_window"])
 
-    motion = smooth(np.array([r["motion"] for r in rows]), k)
-    edge = smooth(np.array([r["edge"] for r in rows]), k)
-    std = smooth(np.array([r["std"] for r in rows]), k)
+    motion = smooth(np.array([r["motion"] for r in rows], dtype=float), k)
+    edge = smooth(np.array([r["edge"] for r in rows], dtype=float), k)
+    std = smooth(np.array([r["std"] for r in rows], dtype=float), k)
+    times = np.array([float(r["t"]) for r in rows], dtype=float)
+    n = len(rows)
+    if n == 0:
+        return []
 
     wall_edge_max = float(c["wall_edge_max"])
     wall_std_max = float(c["wall_std_max"])
     very_fast_motion = float(c["very_fast_motion"])
     transitional_motion = float(c["transitional_motion"])
-    transitional_edge_max = float(c["transitional_edge_max"])
-    # High edge + high motion = intentional balcony/cityscape pan, not a corner cut
-    scenic_edge_min = float(c.get("scenic_edge_min", 0.16))
+
+    # Dual-gate thresholds (with backward-compatible fallbacks)
+    content_struct_min = float(
+        c.get("content_struct_min", c.get("scenic_edge_min", 0.115))
+    )
+    dash_struct_max = float(c.get("dash_struct_max", 0.055))
+    walk_motion_lo = float(c.get("walk_motion_lo", 6.5))
+    corridor_struct_lo = float(c.get("corridor_struct_lo", 0.040))
+    corridor_struct_hi = float(c.get("corridor_struct_hi", 0.110))
+    corridor_sustain_sec = float(c.get("corridor_sustain_sec", 0.8))
+    corridor_sustain_ratio = float(c.get("corridor_sustain_ratio", 0.65))
+    corridor_fast_motion = float(c.get("corridor_fast_motion", 12.0))
+    move_struct_max = float(
+        c.get("move_struct_max", c.get("transitional_edge_max", 0.090))
+    )
+    # High structure (indoor furniture / outdoor scenic) never goes to fast.
+    protect_struct_min = content_struct_min
+
+    # Pre-compute walk-like frames for sustain windows
+    walk_like = np.zeros(n, dtype=bool)
+    for i in range(n):
+        m = float(motion[i])
+        e = float(edge[i])
+        s = float(std[i])
+        wall = e < wall_edge_max and s < wall_std_max
+        mid_struct = corridor_struct_lo <= e <= corridor_struct_hi
+        # Sustained walk band, or faster walk still in mid-structure corridor
+        if wall:
+            walk_like[i] = False
+        elif mid_struct and m >= walk_motion_lo:
+            walk_like[i] = True
+        elif (
+            e < protect_struct_min
+            and e >= corridor_struct_lo
+            and m >= walk_motion_lo
+        ):
+            walk_like[i] = True
 
     labels: list[str] = []
-    for i in range(len(rows)):
-        m, e, s = float(motion[i]), float(edge[i]), float(std[i])
+    for i in range(n):
+        m = float(motion[i])
+        e = float(edge[i])
+        s = float(std[i])
         wall = e < wall_edge_max and s < wall_std_max
-        scenic = e >= scenic_edge_min
-        # Only treat as dash/turn when motion is high AND scene is not information-rich
-        very_fast = m > very_fast_motion and not scenic
-        transitional = (
-            m > transitional_motion
-            and e < transitional_edge_max
-            and not scenic
-        )
 
+        # --- D1: blank wall / door panel ---
         if wall:
             labels.append("fast")
-        elif scenic and m > transitional_motion:
-            # Dense outdoor/structure content while camera moves → protect as room
+            continue
+
+        # --- B: high structure → never accelerate (room / content pan) ---
+        if e >= protect_struct_min:
             labels.append("room")
-        elif very_fast:
+            continue
+
+        # --- D2: low-structure dash / whip turn ---
+        if m > very_fast_motion and e < dash_struct_max:
             labels.append("fast")
-        elif transitional:
+            continue
+
+        # --- C: corridor — mid structure + sustained walk-like motion ---
+        t_now = float(times[i])
+        t_lo = t_now - corridor_sustain_sec
+        # frames in sustain window ending at i
+        j0 = i
+        while j0 > 0 and float(times[j0 - 1]) >= t_lo - 1e-12:
+            j0 -= 1
+        window = walk_like[j0 : i + 1]
+        sustain = (
+            len(window) > 0
+            and float(np.mean(window)) >= corridor_sustain_ratio
+        )
+        mid_struct = corridor_struct_lo <= e <= max(
+            corridor_struct_hi, protect_struct_min - 1e-9
+        )
+        corridor_hit = sustain and mid_struct and m >= walk_motion_lo
+        # Also allow mid-struct high-motion even if slightly above walk_hi
+        if not corridor_hit and sustain and e < protect_struct_min:
+            if corridor_struct_lo <= e and m >= walk_motion_lo:
+                corridor_hit = True
+
+        if corridor_hit:
+            if m >= corridor_fast_motion:
+                labels.append("fast")
+            else:
+                labels.append("move")
+            continue
+
+        # --- fallback transitional walk (relaxed vs legacy edge-only gate) ---
+        if m > transitional_motion and e < move_struct_max:
             labels.append("move")
-        else:
-            labels.append("room")
+            continue
+
+        # --- A: default hold / room ---
+        labels.append("room")
+
     return labels
 
 
@@ -160,6 +267,8 @@ def absorb_short_auto(segs: list[dict], min_dur: float) -> list[dict]:
             target = i - 1 if left >= right else i + 1
         if target < i:
             segs[target]["t1"] = segs[i]["t1"]
+            segs[target]["kind"] = segs[target]["kind"]
+            segs[target]["speed"] = segs[target]["speed"]
         else:
             segs[target]["t0"] = segs[i]["t0"]
         segs.pop(i)
@@ -172,21 +281,190 @@ def merge_short(segs: list[dict], min_dur: float) -> list[dict]:
     return absorb_short_auto(segs, min_dur)
 
 
+def demote_high_struct_fast(
+    segs: list[dict],
+    rows: list[dict],
+    content_struct_min: float,
+    speeds: dict[str, float],
+) -> list[dict]:
+    """Downgrade fast segments whose frames still look content-rich."""
+    if not segs or not rows:
+        return segs
+    out: list[dict] = []
+    for seg in segs:
+        item = dict(seg)
+        if item["kind"] == "fast":
+            mean_e = _segment_mean(rows, float(item["t0"]), float(item["t1"]), "edge")
+            if mean_e >= content_struct_min:
+                item["kind"] = "room"
+                item["speed"] = float(speeds["room"])
+        out.append(item)
+    return coalesce_adjacent(out)
+
+
+def demote_sandwich_fast(
+    segs: list[dict],
+    rows: list[dict],
+    *,
+    content_struct_min: float,
+    max_fast_dur: float,
+    speeds: dict[str, float],
+    require_high_struct_neighbors: bool = True,
+) -> list[dict]:
+    """
+    room — short fast — room with high-structure neighbors → demote fast to room.
+
+    Asymmetric: only demotes when neighbors look like real rooms, so true
+    corridor dashes between mid-structure stretches are kept.
+    """
+    if len(segs) < 3 or max_fast_dur <= 0:
+        return segs
+    segs = [dict(s) for s in segs]
+    changed = True
+    while changed:
+        changed = False
+        i = 1
+        while i < len(segs) - 1:
+            cur = segs[i]
+            left, right = segs[i - 1], segs[i + 1]
+            dur = float(cur["t1"]) - float(cur["t0"])
+            if (
+                cur["kind"] == "fast"
+                and left["kind"] == "room"
+                and right["kind"] == "room"
+                and dur < max_fast_dur
+            ):
+                ok = True
+                if require_high_struct_neighbors and rows:
+                    le = _segment_mean(
+                        rows, float(left["t0"]), float(left["t1"]), "edge"
+                    )
+                    re = _segment_mean(
+                        rows, float(right["t0"]), float(right["t1"]), "edge"
+                    )
+                    ok = le >= content_struct_min and re >= content_struct_min
+                if ok:
+                    cur["kind"] = "room"
+                    cur["speed"] = float(speeds["room"])
+                    segs = coalesce_adjacent(segs)
+                    changed = True
+                    break
+            i += 1
+    return coalesce_adjacent(segs)
+
+
+def promote_corridor_rooms(
+    segs: list[dict],
+    rows: list[dict],
+    cfg: dict[str, Any],
+) -> list[dict]:
+    """
+    Promote long mid-structure room runs that look like corridor walking
+    into move/fast so hallways are not left at 1x.
+    """
+    if not segs or not rows:
+        return segs
+    c = cfg["classify"]
+    speeds = cfg["speeds"]
+    segs_cfg = cfg.get("segments") or {}
+    min_sec = float(segs_cfg.get("corridor_promote_min_sec", 1.2))
+    content_struct_min = float(
+        c.get("content_struct_min", c.get("scenic_edge_min", 0.115))
+    )
+    corridor_struct_lo = float(c.get("corridor_struct_lo", 0.040))
+    corridor_struct_hi = float(c.get("corridor_struct_hi", 0.110))
+    walk_motion_lo = float(c.get("walk_motion_lo", 6.5))
+    corridor_fast_motion = float(c.get("corridor_fast_motion", 12.0))
+
+    out: list[dict] = []
+    for seg in segs:
+        item = dict(seg)
+        dur = float(item["t1"]) - float(item["t0"])
+        if item["kind"] == "room" and dur + 1e-9 >= min_sec:
+            mean_e = _segment_mean(rows, float(item["t0"]), float(item["t1"]), "edge")
+            mean_m = _segment_mean(
+                rows, float(item["t0"]), float(item["t1"]), "motion"
+            )
+            p20_e = _segment_percentile(
+                rows, float(item["t0"]), float(item["t1"]), "edge", 0.2
+            )
+            # Mid-structure sustained walk; not a dense living-room hold
+            mid = (
+                corridor_struct_lo <= mean_e <= corridor_struct_hi
+                or (
+                    mean_e < content_struct_min
+                    and p20_e <= corridor_struct_hi
+                    and mean_e >= corridor_struct_lo
+                )
+            )
+            if mid and mean_m >= walk_motion_lo and mean_e < content_struct_min:
+                if mean_m >= corridor_fast_motion:
+                    item["kind"] = "fast"
+                    item["speed"] = float(speeds["fast"])
+                else:
+                    item["kind"] = "move"
+                    item["speed"] = float(speeds["move"])
+        out.append(item)
+    return coalesce_adjacent(out)
+
+
+def absorb_short_fast(
+    segs: list[dict],
+    rows: list[dict] | None,
+    min_fast_dur: float,
+    wall_edge_max: float,
+    speeds: dict[str, float],
+) -> list[dict]:
+    """
+    Absorb short fast islands into neighbors unless they look like blank walls.
+
+    True wall flashes may stay short; noisy mid-structure flickers should not.
+    """
+    if not segs or min_fast_dur <= 0:
+        return segs
+    segs = [dict(s) for s in segs]
+    while len(segs) > 1:
+        target_i = None
+        for i, s in enumerate(segs):
+            if s["kind"] != "fast":
+                continue
+            dur = float(s["t1"]) - float(s["t0"])
+            if dur >= min_fast_dur:
+                continue
+            # Keep short wall-like fast
+            if rows is not None:
+                mean_e = _segment_mean(rows, float(s["t0"]), float(s["t1"]), "edge")
+                if mean_e < wall_edge_max:
+                    continue
+            target_i = i
+            break
+        if target_i is None:
+            break
+        i = target_i
+        if i == 0:
+            neighbor = 1
+        elif i == len(segs) - 1:
+            neighbor = i - 1
+        else:
+            left = float(segs[i - 1]["t1"]) - float(segs[i - 1]["t0"])
+            right = float(segs[i + 1]["t1"]) - float(segs[i + 1]["t0"])
+            neighbor = i - 1 if left >= right else i + 1
+        # Expand neighbor over the short fast; keep neighbor kind
+        if neighbor < i:
+            segs[neighbor]["t1"] = segs[i]["t1"]
+        else:
+            segs[neighbor]["t0"] = segs[i]["t0"]
+        segs.pop(i)
+        # re-apply speeds for kind consistency after coalesce
+        segs = coalesce_adjacent(segs)
+        for s in segs:
+            s["speed"] = float(speeds[s["kind"]])
+    return coalesce_adjacent(segs)
+
+
 def _segment_mean_edge(rows: list[dict], t0: float, t1: float) -> float:
     """Average edge density for frames overlapping [t0, t1)."""
-    vals = [
-        float(r["edge"])
-        for r in rows
-        if t0 - 1e-9 <= float(r["t"]) < t1 - 1e-9
-    ]
-    if not vals:
-        # include last frame if segment ends at video end
-        vals = [
-            float(r["edge"])
-            for r in rows
-            if t0 - 1e-9 <= float(r["t"]) <= t1 + 1e-9
-        ]
-    return float(np.mean(vals)) if vals else 0.0
+    return _segment_mean(rows, t0, t1, "edge")
 
 
 def apply_room_hold_ramp(
@@ -198,8 +476,8 @@ def apply_room_hold_ramp(
     Scheme A: within each continuous room segment, ramp up speed by dwell time
     so long static holds on the same space feel less draggy. No frames dropped.
 
-    Scenic segments (high mean edge, e.g. balcony cityscape) can skip the ramp
-    so outdoor views are not gradually sped up.
+    Scenic / high-structure and actively moving pans skip the ramp so indoor
+    look-arounds are not gradually sped up into a whip-pan feel.
     """
     pacing = cfg.get("pacing") or {}
     if not pacing.get("enabled", True):
@@ -223,9 +501,14 @@ def apply_room_hold_ramp(
     scenic_skip_edge = float(
         pacing.get(
             "scenic_skip_edge_min",
-            cfg.get("classify", {}).get("scenic_edge_min", 0.18),
+            cfg.get("classify", {}).get(
+                "content_struct_min",
+                cfg.get("classify", {}).get("scenic_edge_min", 0.18),
+            ),
         )
     )
+    # Active camera motion: not a static hold → keep 1x
+    static_hold_motion_max = float(pacing.get("static_hold_motion_max", 7.0))
     room_speed = float(cfg["speeds"]["room"])
 
     out: list[dict] = []
@@ -261,10 +544,14 @@ def apply_room_hold_ramp(
                     speed = step["speed"]
                 else:
                     break
-            # Per-slice scenic protect: dense outdoor structure stays 1x even late in hold
-            if scenic_skip and rows is not None:
+            if rows is not None:
                 avg_e = _segment_mean_edge(rows, a, b)
-                if avg_e >= scenic_skip_edge:
+                avg_m = _segment_mean(rows, a, b, "motion")
+                # Dense structure stays 1x
+                if scenic_skip and avg_e >= scenic_skip_edge:
+                    speed = room_speed
+                # Active pan / walk mislabeled as room: do not ramp
+                elif avg_m > static_hold_motion_max:
                     speed = room_speed
             piece = {
                 "t0": a,
@@ -277,7 +564,6 @@ def apply_room_hold_ramp(
             else:
                 out.append(piece)
     return out
-
 
 
 def apply_overrides(
@@ -392,13 +678,45 @@ def build_segments(
     duration: float,
     cfg: dict[str, Any],
 ) -> list[dict]:
-    """Full classify → merge → override → room-hold ramp pipeline."""
+    """Full classify → merge → dual-gate post → override → room-hold ramp."""
     labels = classify_frames(rows, cfg)
     segs = labels_to_segments(rows, labels, duration, cfg)
-    segs = absorb_short_auto(segs, float(cfg["segments"]["min_duration"]))
+    segs_cfg = cfg.get("segments") or {}
+    segs = absorb_short_auto(segs, float(segs_cfg.get("min_duration", 0.4)))
     speeds = cfg["speeds"]
     for s in segs:
         s["speed"] = float(speeds[s["kind"]])
+
+    c = cfg["classify"]
+    content_struct_min = float(
+        c.get("content_struct_min", c.get("scenic_edge_min", 0.115))
+    )
+    wall_edge_max = float(c["wall_edge_max"])
+
+    # Drop false fast on content-rich pans
+    segs = demote_high_struct_fast(segs, rows, content_struct_min, speeds)
+    segs = demote_sandwich_fast(
+        segs,
+        rows,
+        content_struct_min=content_struct_min,
+        max_fast_dur=float(segs_cfg.get("sandwich_demote_fast_max", 2.5)),
+        speeds=speeds,
+        require_high_struct_neighbors=bool(
+            segs_cfg.get("sandwich_demote_need_high_struct", True)
+        ),
+    )
+    # Lift mid-structure sustained rooms into corridor speeds
+    segs = promote_corridor_rooms(segs, rows, cfg)
+    # Remove short non-wall fast flickers
+    segs = absorb_short_fast(
+        segs,
+        rows,
+        min_fast_dur=float(segs_cfg.get("min_fast_duration", 0.9)),
+        wall_edge_max=wall_edge_max,
+        speeds=speeds,
+    )
+    segs = coalesce_adjacent(segs)
+
     segs = apply_overrides(
         segs,
         list(cfg.get("overrides") or []),

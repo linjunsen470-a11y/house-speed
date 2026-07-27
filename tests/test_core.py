@@ -10,8 +10,11 @@ from evaluate_segments import evaluate
 from walkthrough_edit.classify import (
     absorb_short_auto,
     build_segments,
+    classify_frames,
+    demote_sandwich_fast,
     labels_to_segments,
     normalize_timeline,
+    promote_corridor_rooms,
     validate_timeline,
 )
 from walkthrough_edit.config import load_config
@@ -124,6 +127,119 @@ class SegmentTests(unittest.TestCase):
         # continuous = 1 + 0.5 = 1.5; at 30fps ceil(45)/30 = 1.5
         self.assertAlmostEqual(estimate_output_duration(segs, 30.0), 1.5)
         self.assertAlmostEqual(estimate_output_duration(segs, None), 1.5)
+
+
+class DualGateClassifyTests(unittest.TestCase):
+    """Content protect + corridor promote (dual-gate) regression tests."""
+
+    def _rows(self, specs: list[tuple[float, float, float]], fps: float = 30.0):
+        """Build analysis rows from (motion, edge, std) samples, one per frame."""
+        rows = []
+        for i, (motion, edge, std) in enumerate(specs):
+            rows.append(
+                {
+                    "idx": i,
+                    "t": i / fps,
+                    "mean": 100.0,
+                    "std": std,
+                    "edge": edge,
+                    "motion": motion,
+                }
+            )
+        return rows
+
+    def test_high_structure_pan_is_room_not_fast(self):
+        """Living-room look-around: high motion + high edge must stay room."""
+        cfg = load_config(None)
+        cfg["pacing"]["enabled"] = False
+        # ~1.5s of high-motion, content-rich frames
+        n = 45
+        rows = self._rows([(18.0, 0.13, 60.0)] * n)
+        labels = classify_frames(rows, cfg)
+        self.assertTrue(all(lb == "room" for lb in labels), labels[:5])
+        segs = build_segments(rows, n / 30.0, cfg)
+        self.assertTrue(all(s["kind"] == "room" for s in segs), segs)
+        self.assertTrue(all(float(s["speed"]) <= 1.0 + 1e-6 for s in segs), segs)
+
+    def test_blank_wall_is_fast(self):
+        cfg = load_config(None)
+        cfg["pacing"]["enabled"] = False
+        n = 30
+        rows = self._rows([(4.0, 0.02, 20.0)] * n)
+        labels = classify_frames(rows, cfg)
+        self.assertTrue(all(lb == "fast" for lb in labels))
+
+    def test_low_struct_dash_is_fast(self):
+        cfg = load_config(None)
+        cfg["pacing"]["enabled"] = False
+        n = 30
+        rows = self._rows([(20.0, 0.04, 40.0)] * n)
+        labels = classify_frames(rows, cfg)
+        self.assertTrue(all(lb == "fast" for lb in labels), set(labels))
+
+    def test_sustained_mid_struct_walk_is_move_or_fast(self):
+        """Corridor: mid edge + sustained walk should not stay room."""
+        cfg = load_config(None)
+        cfg["pacing"]["enabled"] = False
+        # 2s of corridor walking
+        n = 60
+        rows = self._rows([(9.0, 0.08, 48.0)] * n)
+        segs = build_segments(rows, n / 30.0, cfg)
+        kinds = {s["kind"] for s in segs}
+        self.assertTrue(kinds & {"move", "fast"}, segs)
+        self.assertNotIn("room", kinds, segs)
+
+    def test_sandwich_fast_between_high_struct_rooms_demoted(self):
+        cfg = load_config(None)
+        speeds = cfg["speeds"]
+        rows = []
+        # 0–1s high-struct room, 1–2s mid fast, 2–3s high-struct room
+        for i in range(90):
+            t = i / 30.0
+            if t < 1.0 or t >= 2.0:
+                edge, motion = 0.14, 8.0
+            else:
+                edge, motion = 0.10, 16.0
+            rows.append(
+                {
+                    "idx": i,
+                    "t": t,
+                    "mean": 100.0,
+                    "std": 55.0,
+                    "edge": edge,
+                    "motion": motion,
+                }
+            )
+        segs = [
+            segment(0.0, 1.0, "room", speeds["room"]),
+            segment(1.0, 2.0, "fast", speeds["fast"]),
+            segment(2.0, 3.0, "room", speeds["room"]),
+        ]
+        out = demote_sandwich_fast(
+            segs,
+            rows,
+            content_struct_min=0.115,
+            max_fast_dur=2.5,
+            speeds=speeds,
+            require_high_struct_neighbors=True,
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["kind"], "room")
+        self.assertAlmostEqual(out[0]["t0"], 0.0)
+        self.assertAlmostEqual(out[0]["t1"], 3.0)
+
+    def test_promote_corridor_room_run(self):
+        cfg = load_config(None)
+        n = 60  # 2s
+        rows = self._rows([(9.5, 0.085, 50.0)] * n)
+        segs = [segment(0.0, 2.0, "room", 1.0)]
+        out = promote_corridor_rooms(segs, rows, cfg)
+        self.assertEqual(len(out), 1)
+        self.assertIn(out[0]["kind"], ("move", "fast"))
+
+    def test_default_fast_speed_is_at_least_three(self):
+        cfg = load_config(None)
+        self.assertGreaterEqual(float(cfg["speeds"]["fast"]), 3.0)
 
 
 class ConfigAndCliTests(unittest.TestCase):
