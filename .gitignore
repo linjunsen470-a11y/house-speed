@@ -10,6 +10,9 @@ build/
 venv/
 .env
 .python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # --- IDE / OS ---
 .idea/
@@ -22,9 +25,15 @@ desktop.ini
 # --- Runtime / regenerable artifacts ---
 frames/
 legacy/
+edited_1/
+eval/
 *.log
 *.part.mp4
 .*.part.mp4
+
+# Scratch / one-off scripts (local only)
+scripts/_*.py
+scripts/_*/
 
 # --- Media: never commit videos / bulk images ---
 *.mp4
@@ -96,3 +105,4 @@ config.local.yaml
 *.filter.txt
 labels.yaml
 *.labels.yaml
+*.jsonl
