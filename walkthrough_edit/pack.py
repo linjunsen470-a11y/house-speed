@@ -1238,14 +1238,16 @@ def pack_video(
     filter_script.write_text(";\n".join(filter_parts), encoding="utf-8")
 
     enc = cfg.get("encode") or {}
-    # Lightweight re-encode for overlay stage — match source family still
+    # Overlay stage re-encode: prefer CRF when match_source is false (lean packs).
     src_codec = str(media.get("video_codec") or "h264")
     vcodec = select_video_codec(src_codec, str(enc.get("video_codec", "auto")))
     ensure_encoder(vcodec)
     preset = str(enc.get("preset", "medium"))
     pix = str(enc.get("pixel_format", "yuv420p"))
+    use_crf = not bool(enc.get("match_source", True))
+    crf = int(float(enc.get("crf", 23)))
 
-    # Prefer bitrate near intermediate if available
+    # Prefer bitrate near intermediate when matching source family
     v_br = int(media.get("video_bitrate") or 0)
     if v_br < 80_000:
         v_br = 400_000
@@ -1262,7 +1264,12 @@ def pack_video(
         "-map", "[outa]",
         "-c:v", vcodec,
         "-preset", preset,
-        "-b:v", f"{max(32, int(round(v_br / 1000)))}k",
+    ]
+    if use_crf:
+        cmd += ["-crf", str(crf)]
+    else:
+        cmd += ["-b:v", f"{max(32, int(round(v_br / 1000)))}k"]
+    cmd += [
         "-pix_fmt", pix,
         "-c:a", "aac",
         "-b:a", "128k",

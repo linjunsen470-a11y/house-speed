@@ -99,7 +99,8 @@ class SegmentTests(unittest.TestCase):
             for i in range(30)
         ]
         result = build_segments(rows, 1.0, cfg)
-        self.assertEqual(result, [segment(0.0, 1.0, "room", 1.0)])
+        room_speed = float(cfg["speeds"]["room"])
+        self.assertEqual(result, [segment(0.0, 1.0, "room", room_speed)])
 
     def test_normalized_timeline_is_continuous(self):
         result = normalize_timeline(
@@ -160,8 +161,12 @@ class DualGateClassifyTests(unittest.TestCase):
         labels = classify_frames(rows, cfg)
         self.assertTrue(all(lb == "room" for lb in labels), labels[:5])
         segs = build_segments(rows, n / 30.0, cfg)
+        room_speed = float(cfg["speeds"]["room"])
         self.assertTrue(all(s["kind"] == "room" for s in segs), segs)
-        self.assertTrue(all(float(s["speed"]) <= 1.0 + 1e-6 for s in segs), segs)
+        # High-structure pans stay room kind (may use room base speed, not fast)
+        self.assertTrue(
+            all(float(s["speed"]) <= room_speed + 1e-6 for s in segs), segs
+        )
 
     def test_blank_wall_is_fast(self):
         cfg = load_config(None)

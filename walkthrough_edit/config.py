@@ -50,9 +50,9 @@ DEFAULTS: dict[str, Any] = {
         "scenic_edge_min": 0.16,
     },
     "speeds": {
-        "room": 1.0,
-        "move": 2.2,
-        "fast": 3.0,
+        "room": 1.2,
+        "move": 2.4,
+        "fast": 3.2,
     },
     "segments": {
         "min_duration": 0.45,
@@ -70,10 +70,10 @@ DEFAULTS: dict[str, Any] = {
         "scenic_skip_edge_min": 0.115,
         "static_hold_motion_max": 7.0,
         "room_hold_ramp": [
-            {"after": 0.0, "speed": 1.0},
-            {"after": 4.0, "speed": 1.5},
-            {"after": 7.0, "speed": 2.0},
-            {"after": 10.0, "speed": 2.8},
+            {"after": 0.0, "speed": 1.2},
+            {"after": 3.0, "speed": 1.5},
+            {"after": 6.0, "speed": 2.0},
+            {"after": 9.0, "speed": 2.6},
         ],
     },
     "overrides": [],
