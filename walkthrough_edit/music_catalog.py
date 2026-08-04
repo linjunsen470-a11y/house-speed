@@ -129,15 +129,16 @@ _CC_BY: dict[str, dict[str, Any]] = {
 }
 BGM_PRESETS.update(_CC_BY)
 
-# Old configs used carefree as default; prefer curated when CC BY files are gone
-DEFAULT_BGM = "pop_hook"
+# Default BGM preset
+DEFAULT_BGM = "random"
 LEGACY_ALIASES: dict[str, str] = {
-    "carefree": "pop_hook",
-    "easy_lemon": "pop_soft",
-    "life_of_riley": "pop_vibe",
-    "summer_day": "pop_spark",
-    "dreamlike": "pop_soft",
-    "bittersweet": "pop_clean",
+    "pop_hook": "a1",
+    "carefree": "a1",
+    "easy_lemon": "a1",
+    "life_of_riley": "a1",
+    "summer_day": "a1",
+    "dreamlike": "a1",
+    "bittersweet": "a1",
 }
 
 CURATED_IDS = [k for k, v in BGM_PRESETS.items() if v.get("group") == "curated"]
@@ -145,12 +146,57 @@ SHORTLIST_IDS = [k for k, v in BGM_PRESETS.items() if v.get("group") == "shortli
 LOCAL_IDS = [k for k, v in BGM_PRESETS.items() if v.get("group") == "local"]
 
 
+AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".flac", ".aac", ".ogg"}
+
+
+def get_all_present_audio_files(assets: Path) -> list[Path]:
+    """Scan assets/music/ for all existing audio files on disk."""
+    music_dir = Path(assets) / "music"
+    if not music_dir.is_dir():
+        return []
+    audio_files: list[Path] = []
+    for p in music_dir.rglob("*"):
+        if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS:
+            audio_files.append(p.resolve())
+    return sorted(audio_files)
+
+
+def scan_and_register_audio_files(assets: Path) -> None:
+    """Dynamically discover any audio files under assets/music/ and register them into BGM_PRESETS."""
+    music_dir = Path(assets) / "music"
+    if not music_dir.is_dir():
+        return
+    existing_files: set[Path] = set()
+    for meta in list(BGM_PRESETS.values()):
+        p = music_dir / meta["file"]
+        if p.is_file():
+            existing_files.add(p.resolve())
+
+    for path in get_all_present_audio_files(assets):
+        if path not in existing_files:
+            rel = path.relative_to(music_dir).as_posix()
+            stem = path.stem
+            key = stem
+            suffix = 1
+            while key in BGM_PRESETS and (music_dir / BGM_PRESETS[key]["file"]).resolve() != path:
+                key = f"{stem}_{suffix}"
+                suffix += 1
+            BGM_PRESETS[key] = {
+                "file": rel,
+                "label": f"本地曲目 {path.name}",
+                "vibe": f"assets/music/{rel}",
+                "group": "local",
+            }
+            existing_files.add(path)
+
+
 def list_bgm_ids() -> list[str]:
     return list(BGM_PRESETS.keys())
 
 
 def list_bgm_ids_present(assets: Path) -> list[str]:
-    """Preset ids whose files exist on disk."""
+    """Preset ids and dynamically discovered audio files whose files exist on disk."""
+    scan_and_register_audio_files(assets)
     music_dir = Path(assets) / "music"
     out: list[str] = []
     for key, meta in BGM_PRESETS.items():
@@ -195,6 +241,7 @@ def resolve_bgm_path(
     if not raw:
         raise ValueError("pack.audio.bgm is empty")
 
+    scan_and_register_audio_files(assets)
     music_dir = Path(assets) / "music"
     raw_norm = raw.replace("\\", "/")
     key = raw_norm.split("/")[-1]
@@ -205,13 +252,16 @@ def resolve_bgm_path(
 
     if key in ("random", "random_soft", "auto", "random_pop"):
         r = rng or random.Random()
+        all_files = get_all_present_audio_files(assets)
+        if all_files:
+            return r.choice(all_files)
         present = list_bgm_ids_present(assets)
         curated = [i for i in CURATED_IDS if i in present]
         pool = curated or present
         if not pool:
             raise FileNotFoundError(
                 "No BGM files found under assets/music "
-                "(expected curated/*.mp3, shortlist/*.mp3, or a*.m4a)"
+                "(expected audio files like *.m4a, *.mp3, *.wav, etc.)"
             )
         pick = r.choice(pool)
         return (music_dir / BGM_PRESETS[pick]["file"]).resolve()
@@ -236,6 +286,9 @@ def resolve_bgm_path(
         found = _resolve_preset_file(key_stem, music_dir)
         if found is not None:
             return found
+        present = list_bgm_ids_present(assets)
+        if present:
+            return (music_dir / BGM_PRESETS[present[0]]["file"]).resolve()
         raise FileNotFoundError(
             f"BGM preset {key_stem!r} file missing: "
             f"{music_dir / BGM_PRESETS[key_stem]['file']}"

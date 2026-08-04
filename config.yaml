@@ -243,10 +243,8 @@ pack:
     enter_ms: 280
     fps: 12
   audio:
-    # 默认 curated：pop_hook | pop_spark | pop_vibe | pop_soft | pop_drive | pop_clean
-    # 短名单：sl01…sl12 或 shortlist/01.mp3
-    # 本地库：a1…a18（缺号自动跳过）| random = 优先 curated
-    bgm: "pop_hook"
+    # 本地库：a1…a18（缺号自动跳过）| random = 随机选曲（默认）
+    bgm: "random"
     volume: 0.80
     fade_in: 0.5
     fade_out: 0.8

@@ -37,6 +37,7 @@ Core product constraints:
   validation.
 - `tests/`: fast unit tests plus small ffmpeg integration tests.
 - `examples/`: safe checked-in configuration and labeling examples.
+- `legacy/`: local folder for archiving completed project video and image files (untracked).
 
 ## Setup and routine commands
 
@@ -120,10 +121,11 @@ Algorithm work:
 The following are local/regenerable and must not be committed:
 
 - source and rendered videos;
-- `frames/`, `edited_1/`, `eval/`, and `legacy/`;
+- `frames/`, `edited_1/`, `eval/`, `legacy/`, and `stickers_workspace/`;
 - ffmpeg logs, `.part` files, Python caches, IDE state, downloaded BGM, and
   generated sticker caches;
-- `config.local.yaml`, `<stem>.edit.yaml`, and private labels.
+- `config.local.yaml`, `<stem>.edit.yaml`, private labels, and `scripts/_*.py`
+  one-off scratch scripts.
 
 Small curated fonts, style boards, sticker previews, Markdown documentation,
 and files under `examples/` are intentionally allowed by `.gitignore`.

@@ -624,23 +624,22 @@ class PackTests(unittest.TestCase):
 
         assets = Path(__file__).resolve().parents[1] / "assets"
         present = list_bgm_ids_present(assets)
-        self.assertIn("pop_hook", present, "curated pop_hook should exist")
-        self.assertEqual(DEFAULT_BGM, "pop_hook")
+        self.assertTrue(len(present) > 0, "at least one BGM preset should exist in assets/music")
+        self.assertEqual(DEFAULT_BGM, "random")
         # Every present preset resolves
         for key in present:
             p = resolve_bgm_path(key, assets)
             self.assertTrue(p.is_file(), key)
-        # Default curated
-        p = resolve_bgm_path("pop_hook", assets)
+        # Resolution of default
+        p = resolve_bgm_path(DEFAULT_BGM, assets)
         self.assertTrue(p.is_file())
-        self.assertTrue(p.name.startswith("bgm_pop_"))
         # shortlist + local library ids when files exist
         if "sl01" in present:
             self.assertTrue(resolve_bgm_path("sl01", assets).is_file())
             self.assertTrue(resolve_bgm_path("01", assets).is_file())
         if "a1" in present:
             self.assertTrue(resolve_bgm_path("a1", assets).is_file())
-        # legacy carefree aliases to pop_hook when CC BY file absent
+        # legacy pop_hook and carefree alias gracefully fallback to available track
         p_legacy = resolve_bgm_path("carefree", assets)
         self.assertTrue(p_legacy.is_file())
         p2 = resolve_bgm_path("random", assets, rng=__import__("random").Random(0))

@@ -43,6 +43,9 @@ eval/
 scripts/_*.py
 scripts/_*/
 
+# Offline sticker design workspace (media + experiments; not runtime)
+stickers_workspace/
+
 # --- Media: never commit videos / bulk images ---
 *.mp4
 *.mov

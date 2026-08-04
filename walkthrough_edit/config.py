@@ -190,7 +190,7 @@ DEFAULTS: dict[str, Any] = {
             "fps": 12,
         },
         "audio": {
-            "bgm": "pop_hook",
+            "bgm": "random",
             "volume": 0.80,
             "fade_in": 0.5,
             "fade_out": 0.8,
@@ -758,7 +758,7 @@ def _validate(cfg: dict[str, Any]) -> None:
     if not isinstance(audio, dict):
         raise ValueError("pack.audio must be a mapping")
     pack["audio"] = {
-        "bgm": str(audio.get("bgm") or "pop_hook").strip() or "pop_hook",
+        "bgm": str(audio.get("bgm") or "random").strip() or "random",
         "volume": _number(audio.get("volume", 0.80), "pack.audio.volume", minimum=0),
         "fade_in": _number(audio.get("fade_in", 0.5), "pack.audio.fade_in", minimum=0),
         "fade_out": _number(audio.get("fade_out", 0.8), "pack.audio.fade_out", minimum=0),

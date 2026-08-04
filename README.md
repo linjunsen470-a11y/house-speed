@@ -92,6 +92,7 @@ clip/
 ├── tests/
 │   ├── test_core.py
 │   └── test_scene_aba.py         # 场景 A→B→A 检测（实验/评测）
+├── legacy/                       # 归档已完成的历史项目视频与图片（不提交 git，保持根目录整洁）
 └── walkthrough_edit/
     ├── analyze.py                # 逐帧 mean / std / edge / motion
     ├── classify.py               # 双门控分类 + 段级后处理 + 静止 boost
@@ -109,6 +110,7 @@ clip/
 ```
 frames/<stem>-<hash>/     # motion.csv, segments.json, summary.json, speed_raw…
 frames/villa_master/      # 多楼层中间片
+legacy/                   # 已完成的剪辑素材与历史成片归档（视频/图片）
 edited_1/                 # 另一套素材与成片（本地）
 eval/                     # 抽帧评测 / 对比（本地）
 *.mp4

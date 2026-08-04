@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-用当前 config + 管线重处理 edited_1/ 下源素材，并打包 209㎡ 别墅成片。
+用当前 config + 管线重处理 edited_2/ 下源素材，并打包 251㎡ 别墅成片。
 
 - 单片：对每个源 mp4 写出 *_edited.mp4
-- 成片：1F→2F→3F→-1F→-2F 拼接包装 → villa_master_edited.mp4
+- 成片：1F→2F→3F→-1F→-2F 拼接包装 → villa_master_edited2.mp4
 - 规则：首秒及封面保持干净无楼层角标；角标从 t=1.0s 淡入。
 """
 from __future__ import annotations
@@ -22,23 +22,23 @@ from walkthrough_edit.pack import pack_video, resolve_font
 from walkthrough_edit.render import probe_duration, probe_media
 from PIL import Image, ImageDraw, ImageFont
 
-MEDIA = root / "legacy" / "edited_1"
+MEDIA = root / "legacy" / "edited_2"
 
 STANDALONE = [
-    "1.mp4",
+    "1-包括前花园后花园.mp4",
     "2a.mp4",
     "2b.mp4",
-    "3a.mp4",
-    "3b.mp4",
+    "3a-主人房.mp4",
+    "3b-主人房.mp4",
     "-1a.mp4",
     "-1b.mp4",
     "-2.mp4",
 ]
 
 FLOOR_SEGMENTS = [
-    {"floor": "1F", "video": "1.mp4", "badge": "1F | 首层大厅客厅"},
-    {"floor": "2F", "video": "2b.mp4", "badge": "2F | 奢华居住套房"},
-    {"floor": "3F", "video": "3b.mp4", "badge": "3F | 主卧套房露台"},
+    {"floor": "1F", "video": "1-包括前花园后花园.mp4", "badge": "1F | 首层奢阔厅院"},
+    {"floor": "2F", "video": "2b.mp4", "badge": "2F | 尊享卧室套房"},
+    {"floor": "3F", "video": "3b-主人房.mp4", "badge": "3F | 奢华主卧露台"},
     {"floor": "-1F", "video": "-1a.mp4", "badge": "-1F | 地下采光夹层"},
     {"floor": "-2F", "video": "-2.mp4", "badge": "-2F | 地下车库多功能厅"},
 ]
@@ -110,7 +110,7 @@ def main() -> None:
     font_path = resolve_font(cfg_base, root / "assets")
 
     print("==========================================")
-    print(" edited_1 (209㎡) · 单片智能变速")
+    print(" edited_2 (251㎡) · 单片智能变速")
     print("==========================================")
     for name in STANDALONE:
         src = MEDIA / name
@@ -129,7 +129,7 @@ def main() -> None:
         print(f"  └─ {res.duration_out:.2f}s → {out}")
 
     print("\n==========================================")
-    print(" edited_1 (209㎡) · 别墅全层打包")
+    print(" edited_2 (251㎡) · 别墅全层打包")
     print("==========================================")
     src_paths = [MEDIA / item["video"] for item in FLOOR_SEGMENTS]
     for p in src_paths:
@@ -139,7 +139,7 @@ def main() -> None:
     out_w, out_h = resolve_output_canvas(src_paths)
     print(f">>> 成片画布: {out_w}x{out_h}")
 
-    work_base = root / "frames" / "villa_master_edited1"
+    work_base = root / "frames" / "villa_master_edited2"
     work_base.mkdir(parents=True, exist_ok=True)
     badge_dir = work_base / "badges"
     badge_dir.mkdir(exist_ok=True)
@@ -195,6 +195,7 @@ def main() -> None:
             vfilters.append(f"fade=t=in:st=0:d={fade_in}")
         if fade_out > 0 and dur > fade_out:
             vfilters.append(f"fade=t=out:st={dur - fade_out:.3f}:d={fade_out}")
+        
         # 首层 (1F) 延时 1.0s 显示角标，保证首帧和封面干净
         enable_str = ":enable='gte(t,1.0)'" if idx == 0 else ""
         fc = (
@@ -241,9 +242,9 @@ def main() -> None:
     merged_cfg["encode"]["video_codec"] = "libx264"
     merged_cfg["pack"]["style"] = "douyin_estate"
     merged_cfg["pack"]["text"] = {
-        "title": "增城湖景别墅破防价",
-        "highlights": ["209㎡四房3厅", "买三层送两层", "60㎡私属庭院"],
-        "price": "总价捡漏 / 随时看房",
+        "title": "250平奢阔5房抄底价",
+        "highlights": ["251㎡五房3厅", "买三层送两层", "25㎡观景露台"],
+        "price": "性价比封神 / 私信了解",
     }
     merged_cfg["pack"]["layout"] = {
         "y_rel": 0.255,
@@ -263,13 +264,13 @@ def main() -> None:
         "y": 0.90,
     }
     merged_cfg["pack"]["audio"] = {
-        "bgm": "assets/music/a5.m4a",
+        "bgm": "assets/music/a7.m4a",
         "volume": 0.80,
         "fade_in": 0.5,
         "fade_out": 0.8,
     }
 
-    final_out = MEDIA / "villa_master_edited.mp4"
+    final_out = MEDIA / "villa_master_edited2.mp4"
     print(f"\n>>> 打包成片最终导出 → {final_out}")
     pack_video(
         input_path=concat_raw,
