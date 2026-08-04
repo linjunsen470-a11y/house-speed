@@ -23,6 +23,14 @@ from walkthrough_edit.classify import (
     promote_flat_rooms,
     validate_timeline,
 )
+from walkthrough_edit.captions import (
+    clean_subtitle_text,
+    expand_cues_for_display,
+    write_ass_captions,
+    wrap_subtitle_text,
+    _ass_time,
+)
+from walkthrough_edit.tts import merge_duck_windows
 from walkthrough_edit.config import load_config
 from walkthrough_edit.pipeline import run_pipeline
 from walkthrough_edit.pack import (
@@ -39,7 +47,18 @@ from walkthrough_edit.render import (
     select_video_codec,
 )
 from walkthrough_edit.scene_aba import fingerprint_gray
+from walkthrough_edit.place import assign_roles, place_cues
+from walkthrough_edit.script import (
+    collect_voice_lines,
+    estimate_speech_seconds,
+    for_speech,
+    layout_cues,
+    lines_from_highlights,
+    validate_cues,
+)
 from walkthrough_edit.text_styles import get_style, list_styles
+from walkthrough_edit.timeline_map import map_segments_to_output, room_bands
+from walkthrough_edit.tts import synthesize_line, write_silence_wav
 
 
 def segment(t0, t1, kind, speed):
@@ -371,6 +390,26 @@ class ConfigAndCliTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "video_codec"):
                 load_config(path)
 
+    def test_voiceover_and_captions_defaults(self):
+        cfg = load_config(None)
+        self.assertFalse(cfg["pack"]["voiceover"]["enabled"])
+        self.assertFalse(cfg["pack"]["captions"]["enabled"])
+        self.assertEqual(cfg["pack"]["voiceover"]["mode"], "highlights")
+        self.assertEqual(cfg["pack"]["voiceover"]["engine"], "auto")
+        self.assertAlmostEqual(cfg["pack"]["voiceover"]["bgm_under_voice"], 0.40, places=2)
+        self.assertEqual(cfg["pack"]["captions"]["style"], "bottom_fixed")
+        self.assertEqual(cfg["pack"]["captions"]["layout"], "bottom_center")
+
+    def test_voiceover_invalid_mode_rejected(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            path = Path(directory) / "bad.yaml"
+            path.write_text(
+                "pack:\n  voiceover:\n    mode: karaoke\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "voiceover.mode"):
+                load_config(path)
+
     def test_input_output_same_path_rejected(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             path = Path(directory) / "same.mp4"
@@ -378,6 +417,171 @@ class ConfigAndCliTests(unittest.TestCase):
             with patch("walkthrough_edit.pipeline.check_tools"):
                 with self.assertRaisesRegex(ValueError, "different"):
                     run_pipeline(path, path, config_path=None, dry_run=True)
+
+
+class VoiceScriptTests(unittest.TestCase):
+    def test_lines_from_highlights_template(self):
+        lines = lines_from_highlights(
+            {
+                "title": "绿湖全新未入住",
+                "highlights": ["南北通透", "双阳台"],
+                "price": "单价5XXX",
+            },
+            sticker_text="私信了解",
+            include_cta=True,
+        )
+        self.assertEqual(len(lines), 4)
+        self.assertIn("绿湖", lines[0])
+        self.assertIn("南北通透", lines[1])
+        self.assertIn("单价", lines[2])
+        self.assertIn("私信了解", lines[3])
+
+    def test_for_speech_price_hook(self):
+        self.assertIn("字头", for_speech("单价5XXX"))
+
+    def test_layout_cues_on_output_timeline(self):
+        lines = ["第一句。", "第二句。", "第三句。"]
+        cues = layout_cues(
+            lines,
+            duration=20.0,
+            start=1.0,
+            end_pad=2.0,
+            gap=0.3,
+            fit="pad",
+        )
+        self.assertGreaterEqual(len(cues), 2)
+        validate_cues(cues, 20.0)
+        self.assertGreaterEqual(cues[0]["start"], 1.0 - 1e-6)
+        self.assertLessEqual(cues[-1]["end"], 18.0 + 1e-6)
+
+    def test_place_cues_on_room_bands_with_spread(self):
+        segs = [
+            {"t0": 0, "t1": 3, "kind": "move", "speed": 2.0},
+            {"t0": 3, "t1": 15, "kind": "room", "speed": 1.0},
+            {"t0": 15, "t1": 20, "kind": "room", "speed": 1.0},
+        ]
+        bands = map_segments_to_output(segs)
+        self.assertTrue(room_bands(bands))
+        roles = assign_roles(["开场", "卖点南北通透", "总价一百六十万", "私信了解"])
+        self.assertEqual(roles[0], "hook")
+        self.assertEqual(roles[-1], "cta")
+        items = [{"text": t, "role": r} for t, r in zip(
+            ["开场", "卖点南北通透", "总价一百六十万", "私信了解"], roles
+        )]
+        cues = place_cues(
+            items,
+            duration=20.0,
+            start=1.0,
+            end_pad=2.0,
+            gap=0.22,
+            fit="pack",
+            coverage=0.55,
+            bands=bands,
+            max_gap=0.55,
+            max_pref_wait=0.9,
+            line_durations=[1.5, 2.0, 2.0, 1.5],
+        )
+        self.assertGreaterEqual(len(cues), 3)
+        validate_cues(cues, 20.0)
+        # Inter-cue silence should stay tight
+        for a, b in zip(cues, cues[1:]):
+            gap = float(b["start"]) - float(a["end"])
+            self.assertLessEqual(gap, 0.56)
+
+    def test_layout_cues_trim_when_too_long(self):
+        lines = ["很长的一句口播内容用于测试裁剪。" * 3 for _ in range(6)]
+        cues = layout_cues(
+            lines,
+            duration=8.0,
+            start=1.0,
+            end_pad=1.0,
+            gap=0.2,
+            fit="trim",
+            line_durations=[3.0] * 6,
+        )
+        self.assertLessEqual(len(cues), 3)
+        validate_cues(cues, 8.0)
+
+    def test_collect_voice_lines_script_mode(self):
+        pack = {
+            "voiceover": {
+                "mode": "script",
+                "script": ["开场卖点", "价格钩子"],
+                "include_cta": False,
+                "max_lines": 5,
+            },
+            "sticker": {"text": "私信"},
+        }
+        lines = collect_voice_lines(pack, {"title": "x", "highlights": [], "price": ""})
+        self.assertEqual(len(lines), 2)
+
+    def test_estimate_speech_seconds_bounds(self):
+        self.assertGreaterEqual(estimate_speech_seconds("好"), 0.8)
+        self.assertLessEqual(estimate_speech_seconds("字" * 100), 6.0)
+
+    def test_clean_subtitle_drops_weak_punct(self):
+        self.assertEqual(
+            clean_subtitle_text("带你看看黄埔悦辰壹号。"),
+            "带你看看黄埔悦辰壹号",
+        )
+        self.assertEqual(
+            clean_subtitle_text("南北通透，双阳台。"),
+            "南北通透双阳台",
+        )
+        self.assertEqual(
+            clean_subtitle_text("覆盖率91.6%，很好！"),
+            "覆盖率91.6%很好！",
+        )
+
+    def test_wrap_and_expand_display(self):
+        wrapped = wrap_subtitle_text("森林覆盖率91.6%负氧离子丰富")
+        self.assertLessEqual(len(wrapped.replace(r"\N", "")), 21)
+        cues = expand_cues_for_display(
+            [{"id": "c1", "text": "带你看看黄埔悦辰壹号。", "start": 1.0, "end": 3.0}],
+        )
+        self.assertEqual(len(cues), 1)
+        self.assertNotIn("。", cues[0]["display"])
+
+    def test_ass_fixed_pos_no_period(self):
+        self.assertEqual(_ass_time(0), "0:00:00.00")
+        self.assertEqual(_ass_time(65.5), "0:01:05.50")
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            cues = [
+                {"text": "测试字幕。", "start": 1.0, "end": 2.5},
+                {"text": "第二句，加逗号。", "start": 3.0, "end": 4.0},
+            ]
+            path = write_ass_captions(
+                cues,
+                root / "c.ass",
+                width=540,
+                height=960,
+                margin_v=90,
+                layout="bottom_center",
+            )
+            text = path.read_text(encoding="utf-8-sig")
+            self.assertIn("Dialogue:", text)
+            self.assertIn("测试字幕", text)
+            self.assertNotIn("测试字幕。", text)
+            # bottom_center: x=270, y=960-90=870
+            self.assertIn(r"\pos(270,870)", text)
+            self.assertEqual(text.count(r"\pos(270,870)"), 2)
+            self.assertIn("PlayResX: 540", text)
+
+    def test_silence_tts_cache(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            cache = Path(directory)
+            path, dur, eng = synthesize_line(
+                "静音占位",
+                cache,
+                engine="silence",
+                duration_hint=1.5,
+            )
+            self.assertEqual(eng, "silence")
+            self.assertTrue(path.is_file())
+            self.assertGreater(dur, 1.0)
+            wav = write_silence_wav(cache / "s.wav", 0.5)
+            self.assertTrue(wav.is_file())
 
 
 class PackTests(unittest.TestCase):
@@ -533,6 +737,7 @@ class PackTests(unittest.TestCase):
 
     def test_sticker_windows_full_and_short_video(self):
         sticker = {
+            "schedule": "fixed",
             "start": 4.5, "duration": 2.5,
             "repeat_at_end": True, "end_lead": 2.8,
         }
@@ -543,6 +748,16 @@ class PackTests(unittest.TestCase):
         self.assertEqual(compute_sticker_windows(6.0, sticker), [(3.2, 6.0)])
         sticker["repeat_at_end"] = False
         self.assertEqual(compute_sticker_windows(6.0, sticker), [(4.5, 6.0)])
+        av = {
+            "schedule": "after_voice",
+            "after_voice_gap": 0.5,
+            "duration": 2.0,
+            "repeat_at_end": True,
+            "end_lead": 2.5,
+        }
+        wins = compute_sticker_windows(20.0, av, voice_end=10.0)
+        self.assertEqual(wins[0], (10.5, 12.5))
+        self.assertEqual(wins[-1][1], 20.0)
 
     def test_sticker_disabled_and_custom_file(self):
         cfg = load_config(None)
@@ -614,6 +829,64 @@ class PackTests(unittest.TestCase):
             self.assertEqual(video["r_frame_rate"], "12/1")
             self.assertTrue(any(stream["codec_type"] == "audio" for stream in streams))
             self.assertAlmostEqual(float(data["format"]["duration"]), 1.5, delta=0.12)
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg required")
+    def test_pack_captions_and_silence_voiceover(self):
+        """Captions + silence engine VO should not break pack output."""
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            source = root / "source.mp4"
+            output = root / "packed_vo.mp4"
+            work = root / "work"
+            subprocess.run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=c=black:s=320x568:r=12:d=8",
+                "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:d=8",
+                "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", str(source),
+            ], check=True)
+            cfg = load_config(None)
+            cfg["pack"]["text"].update({
+                "title": "测试房源",
+                "highlights": ["南北通透"],
+                "price": "单价5XXX",
+            })
+            cfg["pack"]["sticker"]["enabled"] = False
+            cfg["pack"]["audio"]["bgm"] = str(source.resolve())
+            cfg["pack"]["voiceover"].update({
+                "enabled": True,
+                "engine": "silence",
+                "start": 0.5,
+                "end_pad": 0.5,
+                "gap": 0.2,
+                "include_cta": False,
+                "max_lines": 3,
+            })
+            cfg["pack"]["captions"].update({
+                "enabled": True,
+                "margin_v_rel": 0.09,
+            })
+            cfg["pack"]["voiceover"]["bgm_under_voice"] = 0.40
+            pack_video(source, output, cfg, work, project_root=Path.cwd())
+            self.assertTrue(output.is_file())
+            self.assertTrue((work / "captions.ass").is_file())
+            self.assertTrue((work / "voice_cues.json").is_file())
+            cues = json.loads((work / "voice_cues.json").read_text(encoding="utf-8"))
+            self.assertGreaterEqual(len(cues["cues"]), 1)
+            ass = (work / "captions.ass").read_text(encoding="utf-8-sig")
+            self.assertIn("测试房源", ass)
+            self.assertNotIn("。", ass.split("Dialogue:")[-1] if "Dialogue:" in ass else ass)
+            self.assertIn(r"\pos(", ass)
+            # All dialogues share one pos tag value
+            import re as _re
+            poses = _re.findall(r"\\pos\((\d+),(\d+)\)", ass)
+            self.assertGreaterEqual(len(poses), 1)
+            self.assertEqual(len(set(poses)), 1)
+            dur = float(subprocess.check_output([
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", str(output),
+            ], text=True).strip())
+            self.assertAlmostEqual(dur, 8.0, delta=0.25)
     def test_bgm_resolve_presets(self):
         from walkthrough_edit.music_catalog import (
             BGM_PRESETS,

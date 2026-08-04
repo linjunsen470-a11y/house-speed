@@ -1,8 +1,8 @@
 # 房产带看视频 · 自动变速剪辑
 
-对竖屏/横屏**带看 walkthrough** 做智能变速：**不删除任何画面**，用本地 CV 规则把「房间 / 过道 / 空墙」分段并改变播放倍率，可选叠花字、私信贴纸与 BGM。
+对竖屏/横屏**带看 walkthrough** 做智能变速：**不删除任何画面**，用本地 CV 规则把「房间 / 过道 / 空墙」分段并改变播放倍率；可选 Stage-B 包装：花字、私信贴纸、BGM、**TTS 口播与底部字幕**。
 
-> 全程 **OpenCV + numpy + ffmpeg**，不需要大模型。  
+> 全程 **OpenCV + numpy + ffmpeg**（口播可选 `edge-tts`，需网络）。
 > 仓库只含**代码与配置**；输入视频、成片、`frames/` 缓存、`eval/` 评测产物均不提交。
 
 ---
@@ -39,11 +39,15 @@ python edit_speed.py -- -1a.mp4 --dry-run
 # dry-run + 低分标注代理
 python edit_speed.py path/to/input.mp4 --dry-run --review
 
-# 变速 + 包装（花字 + CTA 贴纸 + 仅 BGM）
+# 变速 + 包装（花字 + CTA 贴纸 + BGM）
 python edit_speed.py path/to/input.mp4 --pack
 
-# 只改包装，复用 frames/*/speed_raw.mp4
+# 只改包装，复用 frames/*/speed_raw.mp4（改口播/字幕/BGM 时最快）
 python edit_speed.py path/to/input.mp4 --pack-only
+
+# 口播 + 字幕：复制 examples/sample.edit.yaml 为 <stem>.edit.yaml 后开启
+#   pack.voiceover.enabled / pack.captions.enabled
+# 口播时间轴为「成片秒」；BGM 与口播为恒定垫底混音（bgm_under_voice）
 
 # 列出花字 / 贴纸 / BGM 预设
 python edit_speed.py --list-styles
@@ -82,7 +86,9 @@ clip/
 ├── requirements.txt
 ├── README.md
 ├── assets/                       # 字体 / 贴纸预览 / BGM 说明
-├── examples/sample.edit.yaml
+├── examples/
+│   ├── sample.edit.yaml          # 单片 sidecar 模板（含口播/字幕注释）
+│   └── demo_voice_script.txt     # 口播台词示例
 ├── scripts/
 │   ├── bootstrap_assets.py
 │   ├── fetch_bgm.py
@@ -92,14 +98,17 @@ clip/
 ├── tests/
 │   ├── test_core.py
 │   └── test_scene_aba.py         # 场景 A→B→A 检测（实验/评测）
-├── legacy/                       # 归档已完成的历史项目视频与图片（不提交 git，保持根目录整洁）
+├── legacy/                       # 本地归档（gitignore，不提交）
 └── walkthrough_edit/
     ├── analyze.py                # 逐帧 mean / std / edge / motion
     ├── classify.py               # 双门控分类 + 段级后处理 + 静止 boost
     ├── config.py
     ├── render.py / pipeline.py
-    ├── pack.py                   # 花字 + 贴纸 + BGM
-    ├── scene_aba.py              # 外观/光流离题检测（可选评测）
+    ├── pack.py                   # Stage-B：花字 + 贴纸 + BGM + 口播/字幕
+    ├── script.py / place.py      # 口播文案、room 带落点、紧凑句间
+    ├── tts.py / captions.py      # TTS 缓存合成、固定锚点 ASS
+    ├── timeline_map.py           # segments 源时间 → 成片时间
+    ├── scene_aba.py
     ├── text_styles.py
     ├── stickers_gen.py
     └── music_catalog.py
@@ -139,10 +148,31 @@ render    ffmpeg：trim + setpts + atempo + concat
    │
    ▼
 pack（可选）  花字 + CTA + BGM
+              可选：TTS 口播 + 底部 ASS 字幕（成片时间轴）
    │
    ▼
 *_edited.mp4
 ```
+
+### 口播与字幕（Stage-B，默认关闭）
+
+| 配置 | 说明 |
+|------|------|
+| `pack.voiceover.enabled` | 开启口播；`mode`: `highlights` / `script` / `file` / `chapters` |
+| `pack.voiceover.engine` | `auto`（优先 edge-tts）\| `edge` \| `silence` |
+| `pack.voiceover.bgm_under_voice` | 有口播时 **BGM 恒定音量**（默认 0.40），不做动态闪避 |
+| `pack.voiceover.fit` | `pack` 紧凑句间（默认）；`spread` 略铺开且受 `max_gap` 限制 |
+| `pack.captions.enabled` | 底部字幕；默认 `layout: bottom_center` 固定锚点 |
+| `pack.sticker.schedule` | `after_voice`：口播结束后出 CTA，减少与字幕抢位 |
+
+可选依赖（真人声）：
+
+```bash
+pip install edge-tts
+```
+
+侧车示例：`examples/sample.edit.yaml`、`examples/demo_voice_script.txt`。
+中间产物在 `frames/<stem>-hash/`：`voice_cues.json`、`captions.ass`、`voice_full.wav`。
 
 ### 标签与默认速度（见 `config.yaml`）
 
@@ -312,7 +342,7 @@ CLI：`python edit_speed.py -- -1a.mp4`。ffprobe 已用 `-i` 传路径。
 包装会再编码一层；需要极致画质可只出变速片再叠字幕。
 
 **Q: 音频？**  
-变速片可保留原声加速；`--pack` 默认去掉原声、只留 BGM。
+变速片可保留原声加速；`--pack` 默认去掉原声、只留 BGM。开启口播时为 **BGM 垫底 + 口播** 恒定混音（`bgm_under_voice`），不做 sidechain 闪避。
 
 ---
 

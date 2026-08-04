@@ -2,4 +2,6 @@ opencv-python>=4.8
 numpy>=1.24
 PyYAML>=6.0
 Pillow>=10.0
+# Optional: pack.voiceover.engine edge/auto (network TTS)
+# edge-tts>=6.1
 

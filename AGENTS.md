@@ -28,7 +28,12 @@ Core product constraints:
   post-processing, overrides, and pacing.
 - `walkthrough_edit/render.py`: ffprobe helpers and atomic Stage-A ffmpeg
   rendering.
-- `walkthrough_edit/pack.py`: titles, stickers, BGM, and atomic Stage-B output.
+- `walkthrough_edit/pack.py`: titles, stickers, BGM, optional voiceover/captions,
+  and atomic Stage-B output.
+- `walkthrough_edit/script.py` / `place.py` / `timeline_map.py`: voice lines,
+  role placement on the output timeline, segments→output bands.
+- `walkthrough_edit/tts.py` / `captions.py`: local-first TTS cache and fixed-
+  anchor ASS captions (display text cleaned separately from speech).
 - `walkthrough_edit/pipeline.py`: configuration layers, cache/provenance, and
   end-to-end orchestration.
 - `config.yaml`: checked-in defaults intended for normal personal use.

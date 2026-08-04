@@ -157,24 +157,40 @@ sticker:
 
 ## 音频（BGM）
 
-与 `assets/music/` **磁盘文件一致**（详见 **`music/README.md`**）：
+与 `assets/music/` **磁盘文件一致**（详见 **`music/README.md`**）。默认 `pack.audio.bgm: random` 会扫描库内现有音轨。
 
 | 组 | 配置 id | 说明 |
 |----|---------|------|
-| curated | **`pop_hook`**（默认）/ `pop_spark` / `pop_vibe` / `pop_soft` / `pop_drive` / `pop_clean` | `curated/*.mp3` |
-| shortlist | `sl01` … `sl12` | `shortlist/01.mp3` … |
 | local | `a1` … `a18`（缺号跳过） | `a*.m4a` |
-| random | `random` | 优先 curated |
-| 可选 CC BY | `carefree` 等 | 仅在 `python scripts/fetch_bgm.py` 后可用；否则回退 `pop_hook` |
+| shortlist | `sl01` … | `shortlist/*.mp3`（若有） |
+| curated | `pop_hook` 等 | `curated/*.mp3`（若有） |
+| random | `random` | 随机选库内存在的文件 |
+| 路径 | 相对/绝对文件路径 | 直接指定 mp3/m4a |
 
 ```yaml
 audio:
-  bgm: "pop_hook"    # 或 sl03 / a5 / random / 路径
-  volume: 0.80
+  bgm: "random"      # 或 a5 / shortlist/01.mp3 / 路径
+  volume: 0.80       # 无口播时 BGM 音量
 ```
+
+有 **TTS 口播** 时，BGM 用 `pack.voiceover.bgm_under_voice`（默认 **0.40**）全程恒定垫底，与口播 `amix`，**不做** sidechain / 动态闪避。
 
 ```bash
 python edit_speed.py --list-styles   # 含 BGM 列表
+```
+
+---
+
+## 口播与字幕（可选）
+
+见根目录 `README.md` 与 `examples/sample.edit.yaml`：
+
+- `pack.voiceover` / `pack.captions`（默认关）
+- 字幕：固定底中锚点 ASS；口播文案与上屏文案分轨（弱标点不上屏）
+- 贴纸：`schedule: after_voice` 可避免与口播抢同一时段
+
+```bash
+pip install edge-tts   # 可选，真人声
 ```
 
 ---

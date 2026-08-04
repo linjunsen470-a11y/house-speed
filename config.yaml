@@ -231,22 +231,53 @@ pack:
     # dm_estate_cta_gold | _sky | _mint | _violet | _snow | _heart | _fire
     style: "dm_estate_cta"
     text: "私信了解"         # 私 / 私信 / 私信我 / 私信了解
-    start: 4.5               # 首窗开始秒
-    duration: 2.5            # 首窗时长 → 默认 4.5–7.0s
-    repeat_at_end: true      # 片尾再出一次
-    end_lead: 2.8            # 片尾窗长度（秒）
-    width_rel: 0.30
+    schedule: "after_voice"  # fixed | after_voice | end_only
+    start: 4.5               # schedule=fixed 时用
+    after_voice_gap: 0.45
+    duration: 2.5
+    repeat_at_end: true
+    end_lead: 2.8
+    width_rel: 0.26
     x: 0.16
     y: 0.90
-    file: ""                 # 自备透明 APNG/GIF 时填路径（忽略绘制）
-    enter: "slide_up"        # none | pop | slide_up
+    file: ""
+    enter: "slide_up"
     enter_ms: 280
     fps: 12
   audio:
-    # 本地库：a1…a18（缺号自动跳过）| random = 随机选曲（默认）
     bgm: "random"
     volume: 0.80
     fade_in: 0.5
     fade_out: 0.8
+  voiceover:
+    enabled: false
+    mode: "highlights"   # highlights | script | file | chapters
+    engine: "auto"
+    voice: "zh-CN-XiaoxiaoNeural"
+    rate: "+8%"
+    volume: 1.0
+    bgm_under_voice: 0.40   # 有口播时 BGM 恒定垫底（无动态闪避）
+    start: 1.0
+    end_pad: 2.2
+    gap: 0.22
+    fit: "pack"          # pack=紧凑 | spread=略铺开（仍受 max_gap 限制）
+    coverage: 0.55
+    max_gap: 0.55        # 句间静音上限
+    max_pref_wait: 0.9   # 等 room 段最多再等
+    snap_cuts: true
+    include_cta: true
+    max_lines: 5
+  captions:
+    enabled: false
+    style: "bottom_fixed"
+    layout: "bottom_center"  # 底中；要避贴纸可改 bottom_right + pos_x_rel:0.55
+    pos_x_rel: 0.52
+    font_name: "Microsoft YaHei"
+    font_size_rel: 0.045
+    margin_v_rel: 0.09
+    max_chars_one_line: 12
+    max_chars_two_lines: 21
+    stroke: true
+    avoid_sticker: "horizontal"
 
 

@@ -1,4 +1,4 @@
-"""Stage-B packaging: full-video title, dynamic DM sticker, BGM-only audio."""
+"""Stage-B packaging: title, sticker, BGM, optional voiceover + ASS captions."""
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +10,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from .captions import subtitles_filter, write_ass_captions
 from .render import (
     _filter_complex_file_args,
     _replace_with_retry,
@@ -19,6 +20,14 @@ from .render import (
     select_video_codec,
 )
 from .music_catalog import DEFAULT_BGM, resolve_bgm_path
+from .place import assign_roles, lines_from_chapters, place_cues
+from .script import (
+    collect_voice_lines,
+    estimate_speech_seconds,
+    for_speech,
+    validate_cues,
+)
+from .timeline_map import load_segments, map_segments_to_output
 from .stickers_gen import (
     DEFAULT_STICKER,
     STICKER_SPECS,
@@ -26,6 +35,7 @@ from .stickers_gen import (
     generate_sticker_apng,
 )
 from .text_styles import DEFAULT_STYLE, get_style, list_styles
+from .tts import assemble_voice_track, synthesize_line
 
 
 def assets_root(cfg: dict[str, Any], project_root: Path | None = None) -> Path:
@@ -983,28 +993,261 @@ def _escape_filter_path(path: Path) -> str:
     return text.replace("\\", "\\\\").replace(":", r"\:").replace("'", r"\'")
 
 
-def compute_sticker_windows(duration: float, sticker: dict[str, Any]) -> list[tuple[float, float]]:
-    """Build non-overlapping CTA windows; short clips keep only the ending CTA."""
+def compute_sticker_windows(
+    duration: float,
+    sticker: dict[str, Any],
+    *,
+    voice_end: float | None = None,
+) -> list[tuple[float, float]]:
+    """Build non-overlapping CTA windows; short clips keep only the ending CTA.
+
+    schedule:
+      fixed        — use sticker.start (legacy)
+      after_voice  — first window after voiceover ends (+ gap)
+      end_only     — only trailing CTA
+    """
     if duration <= 0:
         return []
-    start = max(0.0, float(sticker.get("start", 4.5)))
     window_duration = max(0.1, float(sticker.get("duration", 2.5)))
     repeat_at_end = bool(sticker.get("repeat_at_end", True))
     end_lead = max(0.1, float(sticker.get("end_lead", 2.8)))
+    schedule = str(sticker.get("schedule") or "fixed").strip().lower()
+
+    end_start = max(0.0, duration - end_lead)
+    end_window = (end_start, duration)
+
+    if schedule in {"end_only", "end"}:
+        return [end_window]
+
+    if schedule in {"after_voice", "after_vo", "after"} and voice_end is not None:
+        gap = max(0.0, float(sticker.get("after_voice_gap", 0.45)))
+        start = max(0.0, float(voice_end) + gap)
+        # If voice runs too late, fall back to end-only
+        if start + 0.4 >= end_start:
+            return [end_window]
+    else:
+        start = max(0.0, float(sticker.get("start", 4.5)))
 
     if not repeat_at_end:
         if start >= duration:
             return []
         return [(start, min(duration, start + window_duration))]
 
-    end_start = max(0.0, duration - end_lead)
-    end_window = (end_start, duration)
     first_end = min(duration, start + window_duration)
-    # Keep both only when there is breathing room between them. This also
-    # makes short videos degrade to a single, complete ending CTA.
     if start < duration and first_end + 0.5 < end_start:
         return [(start, first_end), end_window]
     return [end_window]
+
+
+def _prepare_voice_and_captions(
+    pack: dict[str, Any],
+    content: dict[str, Any],
+    *,
+    duration: float,
+    width: int,
+    height: int,
+    font_path: str,
+    assets: Path,
+    work_dir: Path,
+) -> dict[str, Any]:
+    """
+    Build optional voice track + ASS captions from pack.text / chapters.
+
+    Places cues on output timeline using room bands + spread coverage.
+    Soft-fails TTS: silence engine still yields cue timing for captions.
+    """
+    vo_cfg = pack.get("voiceover") or {}
+    cap_cfg = pack.get("captions") or {}
+    if not isinstance(vo_cfg, dict):
+        vo_cfg = {}
+    if not isinstance(cap_cfg, dict):
+        cap_cfg = {}
+
+    vo_on = bool(vo_cfg.get("enabled", False))
+    cap_on = bool(cap_cfg.get("enabled", False))
+    result: dict[str, Any] = {
+        "voiceover_enabled": vo_on,
+        "captions_enabled": cap_on,
+        "cues": [],
+        "voice_path": None,
+        "ass_path": None,
+        "engine": "none",
+        "voice_end": None,
+        "bands": [],
+    }
+    if not vo_on and not cap_on:
+        return result
+
+    vo_start = float(vo_cfg.get("start", 1.2))
+    vo_end_pad = float(vo_cfg.get("end_pad", 2.5))
+    vo_gap = float(vo_cfg.get("gap", 0.30))
+    vo_fit = str(vo_cfg.get("fit") or "spread")
+    coverage = float(vo_cfg.get("coverage", 0.72))
+
+    segs = load_segments(work_dir / "segments.json")
+    bands = map_segments_to_output(segs)
+    result["bands"] = bands
+
+    mode = str(vo_cfg.get("mode") or "highlights").strip().lower()
+    place_items: list[dict[str, Any]] = []
+    if mode == "chapters":
+        chapters = vo_cfg.get("chapters") or []
+        if not isinstance(chapters, list):
+            chapters = []
+        place_items = lines_from_chapters(
+            chapters,
+            duration=duration,
+            bands=bands,
+            default_start=vo_start,
+        )
+        if not place_items:
+            # fall back to highlights
+            mode = "highlights"
+    if mode != "chapters":
+        voice_lines = collect_voice_lines(pack, content)
+        roles = assign_roles(voice_lines)
+        place_items = [
+            {"text": line, "role": roles[i] if i < len(roles) else "highlight"}
+            for i, line in enumerate(voice_lines)
+        ]
+
+    if not place_items:
+        print("  pack: voiceover/captions enabled but no script lines; skipped")
+        return result
+
+    engine_used = "captions_only"
+    audio_by_text: dict[str, tuple[str, float, str]] = {}
+    measured: list[float] = []
+
+    if vo_on:
+        cache_dir = work_dir / "vo_cache"
+        engines: list[str] = []
+        try:
+            for item in place_items:
+                speech = for_speech(str(item["text"]))
+                path, dur, used = synthesize_line(
+                    speech,
+                    cache_dir,
+                    engine=str(vo_cfg.get("engine") or "auto"),
+                    voice=str(vo_cfg.get("voice") or "zh-CN-XiaoxiaoNeural"),
+                    rate=str(vo_cfg.get("rate") or "+8%"),
+                    duration_hint=estimate_speech_seconds(speech),
+                )
+                audio_by_text[str(item["text"])] = (str(path.resolve()), dur, used)
+                measured.append(dur)
+                engines.append(used)
+            if engines and all(e == "edge" for e in engines):
+                engine_used = "edge"
+            elif engines and all(e == "silence" for e in engines):
+                engine_used = "silence"
+            else:
+                engine_used = "mixed"
+        except Exception as exc:  # noqa: BLE001 — soft-fail VO
+            print(f"  pack: voiceover failed ({exc}); captions may still run")
+            engine_used = "failed"
+            measured = []
+            audio_by_text = {}
+
+    durs = measured if len(measured) == len(place_items) else None
+    cues = place_cues(
+        place_items,
+        duration=duration,
+        start=vo_start,
+        end_pad=vo_end_pad,
+        gap=vo_gap,
+        fit=vo_fit,
+        coverage=coverage,
+        bands=bands,
+        snap=bool(vo_cfg.get("snap_cuts", True)),
+        snap_window=float(vo_cfg.get("snap_window", 0.15)),
+        line_durations=durs,
+        max_gap=float(vo_cfg.get("max_gap", 0.55)),
+        max_pref_wait=float(vo_cfg.get("max_pref_wait", 0.9)),
+    )
+    if not cues:
+        print("  pack: no voice cues fit in available window; skipped")
+        return result
+    try:
+        validate_cues(cues, duration)
+    except ValueError as exc:
+        print(f"  pack: cue validation warning: {exc}")
+
+    # Attach audio by matching original text order
+    for cue in cues:
+        key = str(cue.get("text") or "")
+        if key in audio_by_text:
+            path, dur, _used = audio_by_text[key]
+            cue["audio"] = path
+            cue["audio_duration"] = round(dur, 3)
+
+    voice_end = max((float(c["end"]) for c in cues), default=None)
+    result["voice_end"] = voice_end
+
+    if vo_on and any(c.get("audio") for c in cues):
+        voice_path = assemble_voice_track(
+            cues,
+            duration,
+            work_dir / "voice_full.wav",
+            work_dir=work_dir,
+        )
+        result["voice_path"] = str(voice_path.resolve()) if voice_path else None
+        if voice_path is None:
+            print("  pack: voice track assemble failed; BGM only")
+
+    result["cues"] = cues
+    result["engine"] = engine_used
+
+    if cap_on and cues:
+        ass_path = work_dir / "captions.ass"
+        fs = int(cap_cfg.get("font_size") or 0)
+        mv = int(cap_cfg.get("margin_v") or 0)
+        ml = int(cap_cfg.get("margin_lr") or 0)
+        write_ass_captions(
+            cues,
+            ass_path,
+            width=width,
+            height=height,
+            font_path=font_path,
+            font_name=str(cap_cfg.get("font_name") or "Microsoft YaHei"),
+            font_size=fs if fs > 0 else None,
+            font_size_rel=float(cap_cfg.get("font_size_rel", 0.045)),
+            margin_v=mv if mv > 0 else None,
+            margin_v_rel=float(cap_cfg.get("margin_v_rel", 0.09)),
+            margin_lr=ml if ml > 0 else None,
+            stroke=bool(cap_cfg.get("stroke", True)),
+            max_one=int(cap_cfg.get("max_chars_one_line") or 12),
+            max_two=int(cap_cfg.get("max_chars_two_lines") or 21),
+            layout=str(cap_cfg.get("layout") or "bottom_right"),
+            pos_x_rel=float(cap_cfg.get("pos_x_rel", 0.60)),
+        )
+        result["ass_path"] = str(ass_path.resolve())
+        fonts_dir = assets / "fonts"
+        result["fonts_dir"] = str(fonts_dir) if fonts_dir.is_dir() else None
+        result["caption_size"] = (width, height)
+
+    (work_dir / "voice_cues.json").write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "timeline": "output",
+                "duration": duration,
+                "engine": engine_used,
+                "fit": vo_fit,
+                "coverage": coverage,
+                "voice_end": voice_end,
+                "room_bands": [
+                    {"t0": b["t0"], "t1": b["t1"], "out_dur": b["out_dur"]}
+                    for b in bands
+                    if b.get("kind") == "room"
+                ][:12],
+                "cues": cues,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return result
 
 
 def pack_video(
@@ -1015,7 +1258,7 @@ def pack_video(
     project_root: Path | None = None,
 ) -> float:
     """
-    Overlay full-video title + timed sticker; replace audio with BGM only.
+    Overlay full-video title + timed sticker; BGM audio with optional VO/captions.
 
     ``input_path`` should be the stage-A speed-edited video.
     """
@@ -1060,7 +1303,8 @@ def pack_video(
 
     sticker_info = _resolve_sticker_path(cfg, assets, work_dir=work_dir)
     sticker_cfg = pack.get("sticker") or {}
-    sticker_windows = compute_sticker_windows(duration, sticker_cfg)
+    if not isinstance(sticker_cfg, dict):
+        sticker_cfg = {}
 
     audio_cfg = pack.get("audio") or {}
     bgm = str(audio_cfg.get("bgm") or DEFAULT_BGM).strip() or DEFAULT_BGM
@@ -1069,8 +1313,38 @@ def pack_video(
     fade_in = float(audio_cfg.get("fade_in", 0.5))
     fade_out = float(audio_cfg.get("fade_out", 0.8))
 
+    # Voice/captions first so sticker schedule can use voice_end
+    voice_info = _prepare_voice_and_captions(
+        pack,
+        content,
+        duration=duration,
+        width=width,
+        height=height,
+        font_path=font_path,
+        assets=assets,
+        work_dir=work_dir,
+    )
+    voice_path = Path(voice_info["voice_path"]) if voice_info.get("voice_path") else None
+    ass_path = Path(voice_info["ass_path"]) if voice_info.get("ass_path") else None
+    fonts_dir_raw = voice_info.get("fonts_dir")
+    fonts_dir = Path(fonts_dir_raw) if fonts_dir_raw else None
+    vo_cfg = pack.get("voiceover") or {}
+    if not isinstance(vo_cfg, dict):
+        vo_cfg = {}
+    vo_volume = float(vo_cfg.get("volume", 1.0))
+    # Constant underlay under VO (no dynamic ducking / sidechain).
+    bgm_under = float(vo_cfg.get("bgm_under_voice", vo_cfg.get("bgm_duck", 0.40)))
+    cues = list(voice_info.get("cues") or [])
+    voice_end = voice_info.get("voice_end")
+    if voice_end is not None:
+        voice_end = float(voice_end)
+
+    sticker_windows = compute_sticker_windows(
+        duration, sticker_cfg, voice_end=voice_end
+    )
+
     # Build multi-input ffmpeg graph
-    # inputs: 0=video, [1=title png], [2=sticker], last=bgm
+    # inputs: 0=video, [title], [sticker], bgm, [voice]
     inputs: list[str] = ["-i", str(input_path)]
     next_idx = 1
     title_idx = None
@@ -1096,6 +1370,13 @@ def pack_video(
 
     inputs += ["-stream_loop", "-1", "-i", str(bgm_path)]
     bgm_idx = next_idx
+    next_idx += 1
+
+    voice_idx = None
+    if voice_path is not None and voice_path.is_file():
+        inputs += ["-i", str(voice_path)]
+        voice_idx = next_idx
+        next_idx += 1
 
     filter_parts: list[str] = []
     current = "[0:v]"
@@ -1221,21 +1502,67 @@ def pack_video(
             current = out
             vlabel += 1
 
+    # Optional ASS captions on the composed video (fixed anchor; no per-cue jump)
+    if ass_path is not None and ass_path.is_file():
+        cap_w, cap_h = voice_info.get("caption_size") or (width, height)
+        sub = subtitles_filter(
+            ass_path,
+            fonts_dir=fonts_dir,
+            width=int(cap_w),
+            height=int(cap_h),
+        )
+        out = f"[v{vlabel}]"
+        filter_parts.append(f"{current}{sub}{out}")
+        current = out
+        vlabel += 1
+
     if current != "[0:v]":
         filter_parts.append(f"{current}format=yuv420p[outv]")
     else:
         filter_parts.append("[0:v]format=yuv420p[outv]")
 
-    # Audio: BGM only, trim to duration, volume, optional fades
-    afades: list[str] = [f"volume={bgm_volume:.4f}"]
-    if fade_in > 0:
-        afades.append(f"afade=t=in:st=0:d={fade_in:.3f}")
-    if fade_out > 0 and duration > fade_out:
-        afades.append(f"afade=t=out:st={max(0.0, duration - fade_out):.3f}:d={fade_out:.3f}")
-    afilter = ",".join(afades)
-    filter_parts.append(
-        f"[{bgm_idx}:a]atrim=0:{duration:.6f},asetpts=PTS-STARTPTS,{afilter}[outa]"
-    )
+    # Audio: BGM only, or balanced constant mix (BGM underlay + VO). No dynamic duck.
+    def _append_afades(label_in: str, label_out: str) -> None:
+        chain: list[str] = []
+        if fade_in > 0:
+            chain.append(f"afade=t=in:st=0:d={fade_in:.3f}")
+        if fade_out > 0 and duration > fade_out:
+            chain.append(
+                f"afade=t=out:st={max(0.0, duration - fade_out):.3f}:d={fade_out:.3f}"
+            )
+        if chain:
+            filter_parts.append(f"{label_in}{','.join(chain)}{label_out}")
+        else:
+            filter_parts.append(f"{label_in}anull{label_out}")
+
+    if voice_idx is not None and cues:
+        # Steady bed: BGM at bgm_under_voice for the whole clip; VO on top.
+        bed = max(0.0, min(1.5, bgm_under))
+        filter_parts.append(
+            f"[{bgm_idx}:a]atrim=0:{duration:.6f},asetpts=PTS-STARTPTS,"
+            f"aformat=sample_rates=48000:channel_layouts=stereo,"
+            f"volume={bed:.4f}[bgm]"
+        )
+        filter_parts.append(
+            f"[{voice_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,"
+            f"volume={vo_volume:.4f},atrim=0:{duration:.6f},asetpts=PTS-STARTPTS[vo]"
+        )
+        filter_parts.append(
+            "[bgm][vo]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed]"
+        )
+        _append_afades("[mixed]", "[outa]")
+    else:
+        afades = [f"volume={bgm_volume:.4f}"]
+        if fade_in > 0:
+            afades.append(f"afade=t=in:st=0:d={fade_in:.3f}")
+        if fade_out > 0 and duration > fade_out:
+            afades.append(
+                f"afade=t=out:st={max(0.0, duration - fade_out):.3f}:d={fade_out:.3f}"
+            )
+        afilter = ",".join(afades)
+        filter_parts.append(
+            f"[{bgm_idx}:a]atrim=0:{duration:.6f},asetpts=PTS-STARTPTS,{afilter}[outa]"
+        )
 
     filter_script = work_dir / "pack_filter_complex.txt"
     filter_script.write_text(";\n".join(filter_parts), encoding="utf-8")
@@ -1286,7 +1613,12 @@ def pack_video(
         idx = cmd.index("-c:a")
         cmd[idx:idx] = ["-tag:v", "hvc1", "-x265-params", "log-level=error"]
 
-    print(f"  pack: style={style_name} sticker_windows={sticker_windows} bgm={bgm_path.name}")
+    cap_note = f" captions={len(cues)}" if ass_path else ""
+    vo_note = f" vo={voice_info.get('engine')}" if voice_path else ""
+    print(
+        f"  pack: style={style_name} sticker_windows={sticker_windows} "
+        f"bgm={bgm_path.name}{vo_note}{cap_note}"
+    )
     last_percent = -10
     process: subprocess.Popen[str] | None = None
     succeeded = False
@@ -1355,6 +1687,16 @@ def pack_video(
         "bgm": str(bgm_path.resolve()),
         "duration": out_dur,
         "font": font_path,
+        "voiceover": {
+            "enabled": bool(voice_info.get("voiceover_enabled")),
+            "engine": voice_info.get("engine"),
+            "voice_path": voice_info.get("voice_path"),
+            "cues": cues,
+        },
+        "captions": {
+            "enabled": bool(voice_info.get("captions_enabled")),
+            "ass_path": voice_info.get("ass_path"),
+        },
     }
     (work_dir / "pack_summary.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"

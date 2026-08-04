@@ -22,15 +22,32 @@ pack:
     # 锁定默认 warm；换色见 assets/README.md（_gold _sky _ink _neon …）
     style: "dm_estate_cta"
     text: "私信了解"         # 或 私 / 私信 / 私信我
-    start: 4.5
+    schedule: "after_voice"  # fixed | after_voice | end_only
+    start: 4.5               # schedule=fixed 时用
+    after_voice_gap: 0.45
     duration: 2.5
     repeat_at_end: true
     end_lead: 2.8
-    width_rel: 0.30
+    width_rel: 0.26
     x: 0.16
     y: 0.90
     enter: "slide_up"
     enter_ms: 280
   audio:
-    bgm: "pop_hook"          # 或 sl01 / a3 / random / shortlist/01.mp3
-    volume: 0.80
+    bgm: "random"            # 或 a3 / shortlist/01.mp3 / 绝对路径
+    volume: 0.80             # 仅 BGM（无口播）时的音量
+  # 可选：口播 + 底部字幕（时间轴为成片秒，非源秒）
+  # voiceover:
+  #   enabled: true
+  #   mode: script           # highlights | script | file | chapters
+  #   script:
+  #     - "带你看看这套房。"
+  #     - "南北通透，采光好。"
+  #   engine: auto           # auto | edge | silence（edge 需: pip install edge-tts）
+  #   bgm_under_voice: 0.40  # 有口播时 BGM 恒定垫底（无动态闪避）
+  #   fit: pack              # pack 紧凑句间；spread 略铺开（受 max_gap 限制）
+  #   max_gap: 0.55
+  # captions:
+  #   enabled: true
+  #   layout: bottom_center  # 或 bottom_right + pos_x_rel: 0.55
+  #   margin_v_rel: 0.09
