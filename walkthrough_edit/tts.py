@@ -1,4 +1,4 @@
-"""Local-first TTS for pack voiceover (edge-tts optional, silence fallback)."""
+"""Local-first TTS for pack voiceover (explicit edge-tts, offline timing fallback)."""
 from __future__ import annotations
 
 import hashlib
@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import wave
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 
 def _sha1_text(*parts: str) -> str:
@@ -45,21 +45,19 @@ def write_silence_wav(path: Path, duration: float, *, sample_rate: int = 24000) 
     """Write a mono 16-bit PCM silence WAV (no ffmpeg required)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.stem}.part{path.suffix}")
+    temporary.unlink(missing_ok=True)
     n_frames = max(1, int(round(max(0.05, duration) * sample_rate)))
-    with wave.open(str(path), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(b"\x00\x00" * n_frames)
-    return path
-
-
-def _edge_tts_available() -> bool:
     try:
-        import edge_tts  # noqa: F401
-    except ImportError:
-        return False
-    return True
+        with wave.open(str(temporary), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(b"\x00\x00" * n_frames)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return path
 
 
 def synthesize_edge_tts(
@@ -76,35 +74,46 @@ def synthesize_edge_tts(
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = out_path.with_name(f".{out_path.stem}.part{out_path.suffix}")
+    temporary.unlink(missing_ok=True)
 
     async def _run() -> None:
         communicate = edge_tts.Communicate(text, voice=voice, rate=rate)
-        await communicate.save(str(out_path))
+        await communicate.save(str(temporary))
 
-    asyncio.run(_run())
-    if not out_path.is_file() or out_path.stat().st_size < 32:
-        raise RuntimeError("edge-tts produced empty audio")
+    try:
+        asyncio.run(_run())
+        if not temporary.is_file() or temporary.stat().st_size < 32:
+            raise RuntimeError("edge-tts produced empty audio")
+        if probe_audio_duration(temporary) <= 0.05:
+            raise RuntimeError("edge-tts duration unreadable")
+        temporary.replace(out_path)
+    finally:
+        temporary.unlink(missing_ok=True)
     return out_path
+
+
+def edge_tts_installed() -> bool:
+    """True if the optional edge-tts package is importable (does not imply network)."""
+    try:
+        import edge_tts  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def resolve_engine(requested: str) -> str:
     """
-    auto → edge if importable, else silence.
-    edge → edge (caller handles failure).
-    silence → silence.
+    ``edge`` is the only networked engine and must be selected explicitly.
+    ``auto`` remains offline-safe and provides silence only for cue timing.
     """
     eng = str(requested or "auto").strip().lower()
     if eng in {"silence", "silent", "none", "mute"}:
         return "silence"
     if eng in {"edge", "edge-tts", "edge_tts"}:
         return "edge"
-    # auto
-    if _edge_tts_available():
-        return "edge"
+    # Never opt into a network service merely because its package is installed.
     return "silence"
-
-
-SynthFn = Callable[..., Path]
 
 
 def synthesize_line(
@@ -120,7 +129,8 @@ def synthesize_line(
     Synthesize one line.
 
     Returns (path, duration_sec, engine_used).
-    On edge failure, falls back to silence of duration_hint (or 1.2s).
+    Edge failures are reported to the caller; silence is only an explicit or
+    offline-safe timing placeholder.
     """
     speech = str(text or "").strip()
     if not speech:
@@ -147,23 +157,25 @@ def synthesize_line(
         if dur > 0.05:
             return out, dur, "edge"
 
+    synthesize_edge_tts(speech, out, voice=voice, rate=rate)
+    dur = probe_audio_duration(out)
+    if dur <= 0.05:
+        out.unlink(missing_ok=True)
+        raise RuntimeError("edge-tts duration unreadable")
+    temporary_meta = meta_path.with_name(f".{meta_path.stem}.part{meta_path.suffix}")
+    temporary_meta.unlink(missing_ok=True)
     try:
-        synthesize_edge_tts(speech, out, voice=voice, rate=rate)
-        dur = probe_audio_duration(out)
-        if dur <= 0.05:
-            raise RuntimeError("edge-tts duration unreadable")
-        meta_path.write_text(
-            json.dumps({"engine": "edge", "voice": voice, "rate": rate, "text": speech}, ensure_ascii=False),
+        temporary_meta.write_text(
+            json.dumps(
+                {"engine": "edge", "voice": voice, "rate": rate, "text": speech},
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
-        return out, dur, "edge"
-    except Exception:
-        # Soft-fail to silence so pack still completes
-        hint = float(duration_hint) if duration_hint and duration_hint > 0 else 1.2
-        silent = cache_dir / f"vo_{key[:16]}_silence.wav"
-        write_silence_wav(silent, hint)
-        dur = probe_audio_duration(silent) or hint
-        return silent, dur, "silence"
+        temporary_meta.replace(meta_path)
+    finally:
+        temporary_meta.unlink(missing_ok=True)
+    return out, dur, "edge"
 
 
 def synthesize_cues(
@@ -175,8 +187,10 @@ def synthesize_cues(
     rate: str = "+8%",
 ) -> tuple[list[dict[str, Any]], str]:
     """
-    Fill each cue with audio path + measured duration; re-layout starts/ends
-    is the caller's job if durations change significantly.
+    Measure each cue duration; attach real audio paths only for non-silence.
+
+    Silence is timing-only (matches pack): no ``audio`` path, so callers must
+    not lower BGM or assemble a fake voice track from placeholders.
 
     Returns (updated_cues, primary_engine).
     """
@@ -195,10 +209,9 @@ def synthesize_cues(
         )
         engines.append(used)
         updated = dict(cue)
-        updated["audio"] = str(path.resolve())
         updated["audio_duration"] = round(dur, 3)
-        # Keep planned window unless measured audio is meaningfully different;
-        # pack assembler uses audio_duration for adelay length, start for place.
+        if used != "silence":
+            updated["audio"] = str(path.resolve())
         out.append(updated)
     primary = "edge" if engines and all(e == "edge" for e in engines) else (
         "silence" if engines and all(e == "silence" for e in engines) else "mixed"
@@ -431,4 +444,3 @@ def sidechain_duck_filter(
             f"dropout_transition=0:normalize=0{out_label}"
         ),
     ]
-

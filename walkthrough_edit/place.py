@@ -255,8 +255,6 @@ def place_cues(
     use_gap = max(0.05, float(gap))
     gap_cap = max(use_gap, float(max_gap))
     pref_wait = max(0.0, float(max_pref_wait))
-    speech_total = sum(durs)
-
     # Keep *script order*. Prefer room bands only within max_pref_wait of cursor.
     placed_start = [0.0] * n
     cursor = t0
@@ -316,10 +314,6 @@ def place_cues(
             if overflow > 0:
                 for i in keep:
                     placed_start[i] = max(t0, placed_start[i] - overflow)
-
-    if fit_mode == "speed" and speech_total > available:
-        scale = available / speech_total
-        durs = [d * scale for d in durs]
 
     cues: list[dict[str, Any]] = []
     for rank, i in enumerate(keep):

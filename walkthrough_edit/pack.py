@@ -35,7 +35,7 @@ from .stickers_gen import (
     generate_sticker_apng,
 )
 from .text_styles import DEFAULT_STYLE, get_style, list_styles
-from .tts import assemble_voice_track, synthesize_line
+from .tts import assemble_voice_track, edge_tts_installed, synthesize_line
 
 
 def assets_root(cfg: dict[str, Any], project_root: Path | None = None) -> Path:
@@ -1172,13 +1172,15 @@ def _prepare_voice_and_captions(
     except ValueError as exc:
         print(f"  pack: cue validation warning: {exc}")
 
-    # Attach audio by matching original text order
+    # Attach real audio by matching original text order. Silence is timing-only
+    # and must not lower the BGM or masquerade as successful voiceover.
     for cue in cues:
         key = str(cue.get("text") or "")
         if key in audio_by_text:
-            path, dur, _used = audio_by_text[key]
-            cue["audio"] = path
-            cue["audio_duration"] = round(dur, 3)
+            path, dur, used = audio_by_text[key]
+            if used != "silence":
+                cue["audio"] = path
+                cue["audio_duration"] = round(dur, 3)
 
     voice_end = max((float(c["end"]) for c in cues), default=None)
     result["voice_end"] = voice_end
@@ -1193,6 +1195,13 @@ def _prepare_voice_and_captions(
         result["voice_path"] = str(voice_path.resolve()) if voice_path else None
         if voice_path is None:
             print("  pack: voice track assemble failed; BGM only")
+    elif vo_on and engine_used == "silence":
+        print("  pack: auto/silence provides timing only; BGM remains at normal volume")
+        if edge_tts_installed():
+            print(
+                "  pack: edge-tts is installed; set pack.voiceover.engine: edge "
+                "for real voiceover"
+            )
 
     result["cues"] = cues
     result["engine"] = engine_used

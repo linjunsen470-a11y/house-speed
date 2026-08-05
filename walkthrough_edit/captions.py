@@ -330,7 +330,7 @@ def write_ass_captions(
     pos_tag = rf"{{\an2\pos({cx},{cy})}}"
 
     display_cues = expand_cues_for_display(
-        cues, max_one=max_one, max_two=max_two, split_long=False
+        cues, max_one=max_one, max_two=max_two, split_long=True
     )
 
     header = f"""[Script Info]

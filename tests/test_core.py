@@ -58,7 +58,12 @@ from walkthrough_edit.script import (
 )
 from walkthrough_edit.text_styles import get_style, list_styles
 from walkthrough_edit.timeline_map import map_segments_to_output, room_bands
-from walkthrough_edit.tts import synthesize_line, write_silence_wav
+from walkthrough_edit.tts import (
+    resolve_engine,
+    synthesize_cues,
+    synthesize_line,
+    write_silence_wav,
+)
 
 
 def segment(t0, t1, kind, speed):
@@ -397,8 +402,9 @@ class ConfigAndCliTests(unittest.TestCase):
         self.assertEqual(cfg["pack"]["voiceover"]["mode"], "highlights")
         self.assertEqual(cfg["pack"]["voiceover"]["engine"], "auto")
         self.assertAlmostEqual(cfg["pack"]["voiceover"]["bgm_under_voice"], 0.40, places=2)
-        self.assertEqual(cfg["pack"]["captions"]["style"], "bottom_fixed")
         self.assertEqual(cfg["pack"]["captions"]["layout"], "bottom_center")
+        self.assertNotIn("style", cfg["pack"]["captions"])
+        self.assertNotIn("avoid_sticker", cfg["pack"]["captions"])
 
     def test_voiceover_invalid_mode_rejected(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
@@ -408,6 +414,16 @@ class ConfigAndCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ValueError, "voiceover.mode"):
+                load_config(path)
+
+    def test_voiceover_speed_fit_rejected(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            path = Path(directory) / "bad.yaml"
+            path.write_text(
+                "pack:\n  voiceover:\n    fit: speed\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "voiceover.fit"):
                 load_config(path)
 
     def test_input_output_same_path_rejected(self):
@@ -568,6 +584,30 @@ class VoiceScriptTests(unittest.TestCase):
             self.assertEqual(text.count(r"\pos(270,870)"), 2)
             self.assertIn("PlayResX: 540", text)
 
+    def test_ass_splits_long_caption_within_two_line_limit(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            path = write_ass_captions(
+                [{
+                    "text": "这是一段明显超过二十一字并且应该避免溢出画面安全区域的字幕文本",
+                    "start": 1.0,
+                    "end": 5.0,
+                }],
+                Path(directory) / "long.ass",
+                width=540,
+                height=960,
+                max_one=12,
+                max_two=21,
+            )
+            dialogues = [
+                line
+                for line in path.read_text(encoding="utf-8-sig").splitlines()
+                if line.startswith("Dialogue:")
+            ]
+            self.assertGreaterEqual(len(dialogues), 2)
+            for line in dialogues:
+                payload = line.split("}", 1)[-1].replace(r"\N", "")
+                self.assertLessEqual(len(payload), 21)
+
     def test_silence_tts_cache(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             cache = Path(directory)
@@ -582,6 +622,40 @@ class VoiceScriptTests(unittest.TestCase):
             self.assertGreater(dur, 1.0)
             wav = write_silence_wav(cache / "s.wav", 0.5)
             self.assertTrue(wav.is_file())
+            self.assertFalse(any(cache.glob("*.part.*")))
+
+    def test_auto_tts_is_offline_safe(self):
+        self.assertEqual(resolve_engine("auto"), "silence")
+        self.assertEqual(resolve_engine("edge"), "edge")
+
+    def test_edge_failure_does_not_fallback_to_silence(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            cache = Path(directory)
+            with patch(
+                "walkthrough_edit.tts.synthesize_edge_tts",
+                side_effect=RuntimeError("offline"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "offline"):
+                    synthesize_line(
+                        "联网失败",
+                        cache,
+                        engine="edge",
+                        duration_hint=1.0,
+                    )
+            self.assertFalse(any(cache.glob("*_silence.wav")))
+
+    def test_synthesize_cues_silence_is_timing_only(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            cache = Path(directory)
+            cues, engine = synthesize_cues(
+                [{"text": "南北通透", "speech": "南北通透", "start": 1.0, "end": 2.5}],
+                cache,
+                engine="silence",
+            )
+            self.assertEqual(engine, "silence")
+            self.assertEqual(len(cues), 1)
+            self.assertNotIn("audio", cues[0])
+            self.assertGreater(cues[0]["audio_duration"], 0.3)
 
 
 class PackTests(unittest.TestCase):
@@ -869,10 +943,12 @@ class PackTests(unittest.TestCase):
             cfg["pack"]["voiceover"]["bgm_under_voice"] = 0.40
             pack_video(source, output, cfg, work, project_root=Path.cwd())
             self.assertTrue(output.is_file())
+            self.assertFalse((work / "voice_full.wav").is_file())
             self.assertTrue((work / "captions.ass").is_file())
             self.assertTrue((work / "voice_cues.json").is_file())
             cues = json.loads((work / "voice_cues.json").read_text(encoding="utf-8"))
             self.assertGreaterEqual(len(cues["cues"]), 1)
+            self.assertFalse(any(cue.get("audio") for cue in cues["cues"]))
             ass = (work / "captions.ass").read_text(encoding="utf-8-sig")
             self.assertIn("测试房源", ass)
             self.assertNotIn("。", ass.split("Dialogue:")[-1] if "Dialogue:" in ass else ass)

@@ -159,13 +159,13 @@ pack（可选）  花字 + CTA + BGM
 | 配置 | 说明 |
 |------|------|
 | `pack.voiceover.enabled` | 开启口播；`mode`: `highlights` / `script` / `file` / `chapters` |
-| `pack.voiceover.engine` | `auto`（优先 edge-tts）\| `edge` \| `silence` |
-| `pack.voiceover.bgm_under_voice` | 有口播时 **BGM 恒定音量**（默认 0.40），不做动态闪避 |
+| `pack.voiceover.engine` | `auto` / `silence` 仅离线计时；显式 `edge` 才联网生成口播 |
+| `pack.voiceover.bgm_under_voice` | 有真实口播音轨时 **BGM 恒定音量**（默认 0.40），不做动态闪避 |
 | `pack.voiceover.fit` | `pack` 紧凑句间（默认）；`spread` 略铺开且受 `max_gap` 限制 |
-| `pack.captions.enabled` | 底部字幕；默认 `layout: bottom_center` 固定锚点 |
+| `pack.captions.enabled` | 底部字幕；默认 `layout: bottom_center` 固定锚点（已移除无用的 `style` / `avoid_sticker`） |
 | `pack.sticker.schedule` | `after_voice`：口播结束后出 CTA，减少与字幕抢位 |
 
-可选依赖（真人声）：
+可选依赖（联网口播；安装后仍须显式配置 `engine: edge`）：
 
 ```bash
 pip install edge-tts

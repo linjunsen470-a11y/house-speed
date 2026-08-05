@@ -252,7 +252,7 @@ pack:
   voiceover:
     enabled: false
     mode: "highlights"   # highlights | script | file | chapters
-    engine: "auto"
+    engine: "auto"       # auto/silence=仅离线计时；联网口播须显式改为 edge
     voice: "zh-CN-XiaoxiaoNeural"
     rate: "+8%"
     volume: 1.0
@@ -269,7 +269,6 @@ pack:
     max_lines: 5
   captions:
     enabled: false
-    style: "bottom_fixed"
     layout: "bottom_center"  # 底中；要避贴纸可改 bottom_right + pos_x_rel:0.55
     pos_x_rel: 0.52
     font_name: "Microsoft YaHei"
@@ -278,6 +277,3 @@ pack:
     max_chars_one_line: 12
     max_chars_two_lines: 21
     stroke: true
-    avoid_sticker: "horizontal"
-
-

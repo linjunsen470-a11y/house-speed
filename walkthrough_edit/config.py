@@ -214,7 +214,7 @@ DEFAULTS: dict[str, Any] = {
             "start": 1.0,
             "end_pad": 2.2,
             "gap": 0.22,
-            "fit": "pack",  # pack | spread | speed | trim（pack=紧凑，少留白）
+            "fit": "pack",  # pack | spread | trim（pack=紧凑，少留白）
             "coverage": 0.55,
             "max_gap": 0.55,  # 句间静音上限（秒）
             "max_pref_wait": 0.9,  # 等 room 段最多再等这么久
@@ -226,7 +226,6 @@ DEFAULTS: dict[str, Any] = {
         },
         "captions": {
             "enabled": False,
-            "style": "bottom_fixed",
             "layout": "bottom_center",  # bottom_center | bottom_right（略偏右避贴纸）
             "pos_x_rel": 0.52,
             "font_name": "Microsoft YaHei",
@@ -238,9 +237,6 @@ DEFAULTS: dict[str, Any] = {
             "max_chars_one_line": 12,
             "max_chars_two_lines": 21,
             "stroke": True,
-            "avoid_sticker": "horizontal",
-            "y_rel": 0.88,
-            "max_width_rel": 0.90,
         },
     },
 }
@@ -830,8 +826,8 @@ def _validate(cfg: dict[str, Any]) -> None:
     if vo_engine not in {"auto", "edge", "edge-tts", "edge_tts", "silence", "silent", "none", "mute"}:
         raise ValueError("pack.voiceover.engine must be auto|edge|silence")
     vo_fit = str(vo.get("fit") or "pack").strip().lower()
-    if vo_fit not in {"pad", "pack", "spread", "speed", "trim"}:
-        raise ValueError("pack.voiceover.fit must be pack|spread|speed|trim")
+    if vo_fit not in {"pad", "pack", "spread", "trim"}:
+        raise ValueError("pack.voiceover.fit must be pack|spread|trim")
     script_val = vo.get("script")
     if script_val is None:
         script_list: list[str] = []
@@ -914,26 +910,11 @@ def _validate(cfg: dict[str, Any]) -> None:
     cap = pack.get("captions") or {}
     if not isinstance(cap, dict):
         raise ValueError("pack.captions must be a mapping")
-    cap_style = str(cap.get("style") or "bottom_fixed").strip().lower()
-    if cap_style not in {"bottom_fixed", "bottom_bar", "plain"}:
-        raise ValueError("pack.captions.style must be bottom_fixed|bottom_bar|plain")
     cap_layout = str(cap.get("layout") or "bottom_center").strip().lower()
-    if cap_layout not in {"bottom_right", "bottom_center", "center", "bottom_bar", "plain"}:
-        raise ValueError("pack.captions.layout must be bottom_right|bottom_center")
-    avoid_raw = cap.get("avoid_sticker", "horizontal")
-    if isinstance(avoid_raw, bool):
-        avoid_sticker = "horizontal" if avoid_raw else "off"
-    else:
-        avoid_sticker = str(avoid_raw or "horizontal").strip().lower()
-    if avoid_sticker in {"true", "1", "yes", "vertical"}:
-        avoid_sticker = "horizontal"
-    if avoid_sticker not in {"horizontal", "off", "none", "false", "0"}:
-        raise ValueError("pack.captions.avoid_sticker must be horizontal|off")
-    if avoid_sticker in {"none", "false", "0"}:
-        avoid_sticker = "off"
+    if cap_layout not in {"bottom_right", "bottom_center", "center"}:
+        raise ValueError("pack.captions.layout must be bottom_right|bottom_center|center")
     pack["captions"] = {
         "enabled": bool(cap.get("enabled", False)),
-        "style": cap_style,
         "layout": cap_layout,
         "pos_x_rel": _number(cap.get("pos_x_rel", 0.52), "pack.captions.pos_x_rel", minimum=0.4),
         "font_name": str(cap.get("font_name") or "Microsoft YaHei").strip()
@@ -968,11 +949,6 @@ def _validate(cfg: dict[str, Any]) -> None:
             )
         ),
         "stroke": bool(cap.get("stroke", True)),
-        "avoid_sticker": avoid_sticker,
-        "y_rel": _number(cap.get("y_rel", 0.88), "pack.captions.y_rel", minimum=0.5),
-        "max_width_rel": _number(
-            cap.get("max_width_rel", 0.90), "pack.captions.max_width_rel", minimum=0.4
-        ),
     }
     if pack["captions"]["pos_x_rel"] > 0.8:
         raise ValueError("pack.captions.pos_x_rel must be <= 0.8")
@@ -986,8 +962,4 @@ def _validate(cfg: dict[str, Any]) -> None:
         raise ValueError("pack.captions.max_chars_two_lines must be <= 40")
     if pack["captions"]["max_chars_two_lines"] < pack["captions"]["max_chars_one_line"]:
         raise ValueError("pack.captions.max_chars_two_lines must be >= max_chars_one_line")
-    if pack["captions"]["y_rel"] > 0.98:
-        raise ValueError("pack.captions.y_rel must be <= 0.98")
-    if pack["captions"]["max_width_rel"] > 1:
-        raise ValueError("pack.captions.max_width_rel must be <= 1")
     cfg["pack"] = pack

@@ -43,7 +43,7 @@ pack:
   #   script:
   #     - "带你看看这套房。"
   #     - "南北通透，采光好。"
-  #   engine: auto           # auto | edge | silence（edge 需: pip install edge-tts）
+  #   engine: edge           # 仅显式 edge 联网；auto/silence 只做字幕计时占位
   #   bgm_under_voice: 0.40  # 有口播时 BGM 恒定垫底（无动态闪避）
   #   fit: pack              # pack 紧凑句间；spread 略铺开（受 max_gap 限制）
   #   max_gap: 0.55
