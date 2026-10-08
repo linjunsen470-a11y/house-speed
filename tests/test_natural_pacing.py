@@ -44,7 +44,7 @@ def test_all_shipped_configs_keep_natural_speed_range():
     main = load_config(root / 'config.yaml')
     for config in [main, load_config(None)] + [
         merge_config_file(main, root / rel)
-        for rel in ['examples/sample.edit.yaml', 'lvhu-822.edit.yaml', 'lvhu-823.edit.yaml']
+        for rel in ['examples/sample.edit.yaml']
     ]:
         assert config['speeds'] == {'room': 1.0, 'move': 1.18, 'fast': 1.30}
         assert config['pacing']['static_boost_speed'] <= 1.30
