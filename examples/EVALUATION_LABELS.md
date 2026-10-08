@@ -19,7 +19,7 @@ New labels may additionally describe the editing intent directly:
   "vis_kind": "room",
   "confidence": 0.9,
   "acceptable_speed_min": 1.0,
-  "acceptable_speed_max": 1.7,
+  "acceptable_speed_max": 1.3,
   "content_value": "showcase",
   "camera_motion": "pan"
 }
@@ -40,6 +40,18 @@ Run the full current dataset:
 ```bash
 python evaluate_segments.py --dataset eval/strict --work-root frames
 ```
+
+For the natural pacing profile, judge speed ranges independently of class names:
+`fast` now normally means 1.30x rather than the former 3.5x. Relabel subjective
+speed acceptance for the new intended use before treating old speed bounds as
+acceptance criteria. Classification F1 alone does not measure natural camera feel
+or how well a future TTS narration fits.
+
+Media and evaluation caches were deliberately left on the desktop during
+migration. This repository does not include the local dataset; pass its real
+paths or generate new analysis caches. The tuner refuses missing or corrupt
+feature caches. See `AUDIT.md` for the current local regression snapshot and its
+limitations.
 
 Run the bounded legacy grid and leave-one-video-out validation:
 

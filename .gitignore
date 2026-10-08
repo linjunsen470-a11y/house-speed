@@ -1,56 +1,40 @@
-# --- Python ---
+# Python / tools
 __pycache__/
 *.py[cod]
-*$py.class
 *.egg-info/
-.eggs/
-dist/
-build/
 .venv/
 venv/
 .env
-.python-version
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
-coverage.xml
 htmlcov/
-.hypothesis/
-
-# --- IDE / OS ---
+dist/
+build/
 .idea/
 .vscode/
 .agents/
-*.swp
-*.swo
-*.bak
 *.tmp
-.DS_Store
+*.bak
 Thumbs.db
-desktop.ini
+.DS_Store
 
-# --- Runtime / regenerable artifacts ---
+# Source media and generated analysis / results
 frames/
-legacy/
-edited_1/
 eval/
-*.log
-*.part.mp4
-.*.part.mp4
-
-# Scratch / one-off scripts (local only)
-scripts/_*.py
-scripts/_*/
-
-# Offline sticker design workspace (media + experiments; not runtime)
-stickers_workspace/
-
-# --- Media: never commit videos / bulk images ---
+legacy/
 *.mp4
 *.mov
-*.avi
 *.mkv
+*.avi
 *.webm
 *.m4v
 *.wmv
@@ -63,57 +47,41 @@ stickers_workspace/
 *.png
 *.gif
 *.webp
+*.mp3
+*.m4a
+*.wav
+*.aac
+*.flac
+*.ogg
+*.log
+*.filter.txt
+*.jsonl
+config.local.yaml
+*.edit.yaml
+!examples/**/*.edit.yaml
+labels.yaml
+*.labels.yaml
+
+# Other media, assets, archives and generated reports
+*.apng
 *.bmp
 *.tif
 *.tiff
-*.ico
 *.svg
-images/
-
-# Keep pack asset docs + small fonts + style previews in repo
-!assets/
-!assets/**
-!assets/text_previews/*.png
-!assets/stickers/previews/*.png
-!assets/style_board/*.png
-!assets/fonts/*.ttf
-!assets/fonts/*.otf
-
-# BGM audio is large — keep only markdown docs in git
-assets/music/**
-!assets/music/**/
-!assets/music/**/*.md
-
-# Do not commit random audio dumps under assets/
-assets/*.mp3
-assets/*.m4a
-assets/*.wav
-assets/*.aac
-assets/*.flac
-assets/*.ogg
-
-# Sticker scratch / generated APNG cache / Noto GIF download cache
-assets/stickers/external/
-assets/stickers/_candidates/
-assets/stickers/.generated/
-assets/style_board/_sticker_work/
-assets/style_board/_tmp_*/
-assets/stickers/*.apng
-assets/stickers/preview_*.jpg
-assets/stickers/preview_*.png
-assets/stickers/_test.png
-
-# Optional large CJK fonts (download yourself)
-assets/fonts/LXGW*.ttf
-assets/fonts/SourceHan*
-assets/fonts/NotoSans*
-
-# --- Optional local overrides / scratch ---
-config.local.yaml
-*.edit.yaml
-!examples/**/*.yaml
-!examples/**/*.edit.yaml
-*.filter.txt
-labels.yaml
-*.labels.yaml
-*.jsonl
+*.ico
+*.ttf
+*.otf
+*.aiff
+*.wma
+*.m2ts
+*.mts
+*.npz
+*.npy
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
+*.part
+coverage.xml
+.hypothesis/

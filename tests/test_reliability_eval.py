@@ -7,16 +7,12 @@ from unittest.mock import patch
 import numpy as np
 
 from evaluate_segments import evaluate_points
-from scripts.bootstrap_assets import fetch_bgm_library
 from walkthrough_edit.analyze import frame_entropy
 from walkthrough_edit.classify import classify_frames_candidate
 from walkthrough_edit.config import load_config
-from walkthrough_edit.pack import pack_video
 from walkthrough_edit.pipeline import (
     _attach_features,
-    _validate_pack_only_source,
     _write_features,
-    _write_raw_provenance,
 )
 
 
@@ -62,40 +58,14 @@ class CacheReliabilityTests(unittest.TestCase):
             )
             self.assertFalse(_attach_features(target, path))
 
-    def test_pack_only_rejects_changed_source_and_warns_on_stage_config(self):
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
-            root = Path(directory)
-            source = root / "source.mp4"
-            raw = root / "speed_raw.mp4"
-            source.write_bytes(b"source-v1")
-            raw.write_bytes(b"raw")
-            cfg = load_config(None)
-            meta = root / "speed_raw.meta.json"
-            _write_raw_provenance(meta, source, raw, cfg)
-            self.assertEqual(_validate_pack_only_source(source, raw, root, cfg), [])
 
-            changed_cfg = load_config(None)
-            changed_cfg["speeds"]["room"] = 1.5
-            warnings = _validate_pack_only_source(source, raw, root, changed_cfg)
-            self.assertTrue(any("Stage-A config changed" in item for item in warnings))
-
-            source.write_bytes(b"source-v2")
-            with self.assertRaisesRegex(ValueError, "source video changed"):
-                _validate_pack_only_source(source, raw, root, cfg)
-
-
-class ConfigAndBootstrapTests(unittest.TestCase):
+class ConfigWarningTests(unittest.TestCase):
     def test_unknown_config_key_warns_with_suggestion(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             path = Path(directory) / "config.yaml"
             path.write_text("speads:\n  room: 1.5\n", encoding="utf-8")
             with self.assertWarnsRegex(UserWarning, "did you mean 'speeds'"):
                 load_config(path)
-
-    @patch("scripts.bootstrap_assets.subprocess.run")
-    def test_bgm_bootstrap_propagates_child_failure(self, run):
-        fetch_bgm_library()
-        self.assertTrue(run.call_args.kwargs["check"])
 
 
 class EvaluationAndCandidateTests(unittest.TestCase):
@@ -145,42 +115,6 @@ class EvaluationAndCandidateTests(unittest.TestCase):
         flat = np.zeros((32, 32), dtype=np.uint8)
         textured = np.tile(np.arange(32, dtype=np.uint8) * 8, (32, 1))
         self.assertGreater(frame_entropy(textured), frame_entropy(flat))
-
-
-class PackDirectoryTests(unittest.TestCase):
-    def test_pack_creates_output_parent_before_ffmpeg(self):
-        cfg = load_config(None)
-        cfg["pack"]["sticker"]["enabled"] = False
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
-            root = Path(directory)
-            source = root / "source.mp4"
-            source.write_bytes(b"x")
-            output = root / "new" / "nested" / "out.mp4"
-            bgm = root / "bgm.mp3"
-            bgm.write_bytes(b"x")
-
-            def fail_after_assert(*args, **kwargs):
-                self.assertTrue(output.parent.is_dir())
-                raise RuntimeError("stop before external ffmpeg")
-
-            media = {
-                "width": 540,
-                "height": 960,
-                "duration": 1.0,
-                "video_codec": "h264",
-                "video_bitrate": 400_000,
-            }
-            with (
-                patch("walkthrough_edit.pack.probe_media", return_value=media),
-                patch("walkthrough_edit.pack.resolve_font", return_value="font.ttf"),
-                patch("walkthrough_edit.pack.render_title_overlay", return_value=None),
-                patch("walkthrough_edit.pack._resolve_sticker_path", return_value=None),
-                patch("walkthrough_edit.pack.resolve_bgm_path", return_value=bgm),
-                patch("walkthrough_edit.pack.ensure_encoder"),
-                patch("walkthrough_edit.pack.subprocess.Popen", side_effect=fail_after_assert),
-            ):
-                with self.assertRaisesRegex(RuntimeError, "stop before"):
-                    pack_video(source, output, cfg, root / "work", project_root=root)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 """
 房产带看视频 · 自动变速剪辑 CLI
 
-不删除任何片段：房间 1x，转角/空墙加速。参数见 config.yaml。
+保留完整源时间段：实景展示较慢，走廊和空墙加速。参数见 config.yaml。
 
 示例:
   python edit_speed.py 2.mp4
@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Auto variable-speed edit for walkthrough videos "
-            "(keeps all frames; rooms 1x; transitions faster)."
+            "(preserves source intervals; rooms slower; transitions faster)."
         )
     )
     parser.add_argument(
@@ -42,8 +42,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-c",
         "--config",
-        default="config.yaml",
-        help="Path to config.yaml (default: ./config.yaml)",
+        default=None,
+        help="Explicit config path (default: current-directory or project config.yaml)",
     )
     parser.add_argument(
         "--dry-run",
@@ -79,57 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print only a machine-readable JSON result",
     )
-    parser.add_argument(
-        "--pack",
-        action="store_true",
-        help=(
-            "After speed-edit, burn full-video title + DM sticker and "
-            "replace audio with BGM only (see pack.* in config / .edit.yaml)"
-        ),
-    )
-    parser.add_argument(
-        "--pack-only",
-        action="store_true",
-        help="Skip analyze/export; re-pack existing work/*/speed_raw.mp4",
-    )
-    parser.add_argument(
-        "--list-styles",
-        action="store_true",
-        help="List built-in title styles, stickers, and BGM presets, then exit",
-    )
     args = parser.parse_args(argv)
-
-    if args.list_styles:
-        root = Path(__file__).resolve().parent
-        if str(root) not in sys.path:
-            sys.path.insert(0, str(root))
-        from walkthrough_edit.music_catalog import BGM_PRESETS
-        from walkthrough_edit.stickers_gen import STICKER_SPECS
-        from walkthrough_edit.text_styles import STYLES, list_styles
-
-        try:
-            sys.stdout.reconfigure(encoding="utf-8")
-        except Exception:
-            pass
-        print("Title styles (pack.style):")
-        for key in list_styles():
-            print(f"  {key:16s}  {STYLES[key].get('label', '')}")
-        print("\nSticker styles (pack.sticker.style):")
-        for key, meta in STICKER_SPECS.items():
-            print(f"  {key:16s}  {meta.get('label', '')}")
-        from walkthrough_edit.music_catalog import list_bgm_ids_present
-
-        print("\nBGM presets (pack.audio.bgm):")
-        print("  random           优先 curated，否则 shortlist / a*")
-        assets = root / "assets"
-        present = set(list_bgm_ids_present(assets))
-        for key, meta in BGM_PRESETS.items():
-            mark = " " if key in present else "!"
-            print(
-                f"  {mark}{key:15s}  {meta.get('label', '')}  — {meta.get('vibe', '')}"
-            )
-        print("  (! = 文件不在磁盘；CC BY 可 python scripts/fetch_bgm.py)")
-        return 0
 
     if not args.input:
         parser.print_help()
@@ -144,17 +94,15 @@ def main(argv: list[str] | None = None) -> int:
     from walkthrough_edit.pipeline import run_pipeline
 
     config_path = args.config
-    if config_path and not Path(config_path).is_file():
-        # fall back to project-root config
-        alt = root / config_path
-        if alt.is_file():
-            config_path = str(alt)
-        else:
-            if not args.json:
-                print(f"Warning: config not found ({args.config}), using built-in defaults")
+    if config_path is None:
+        candidate = Path("config.yaml")
+        config_path = candidate if candidate.is_file() else root / "config.yaml"
+        if not Path(config_path).is_file():
             config_path = None
 
     try:
+        if args.config is not None and not Path(args.config).is_file():
+            raise FileNotFoundError(f"Config not found: {args.config}")
         kwargs = {
             "input_path": args.input,
             "output_path": args.output,
@@ -163,8 +111,6 @@ def main(argv: list[str] | None = None) -> int:
             "edit_config_path": args.edit_config,
             "reanalyze": args.reanalyze,
             "review_path": args.review,
-            "pack": True if args.pack else None,
-            "pack_only": bool(args.pack_only),
         }
         if args.json:
             with redirect_stdout(io.StringIO()):

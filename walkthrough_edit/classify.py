@@ -570,6 +570,40 @@ def demote_long_structured_fast(
     return coalesce_adjacent(out)
 
 
+def demote_informative_fast(
+    segs: list[dict],
+    rows: list[dict],
+    cfg: dict[str, Any],
+) -> list[dict]:
+    """Protect content-rich shots using the existing local information score.
+
+    Old analysis caches do not contain ``information_score``; in that case the
+    legacy edge/motion behavior is preserved exactly.
+    """
+    if not segs or not rows:
+        return segs
+    threshold = float(
+        (cfg.get("segments") or {}).get("informative_fast_guard_min", 0.72)
+    )
+    speeds = cfg["speeds"]
+    out: list[dict] = []
+    for seg in segs:
+        item = dict(seg)
+        if item["kind"] == "fast":
+            t0, t1 = float(item["t0"]), float(item["t1"])
+            values = [
+                float(row["information_score"])
+                for row in rows
+                if row.get("information_score") is not None
+                and t0 - 1e-9 <= float(row["t"]) < t1 - 1e-9
+            ]
+            if values and float(np.mean(values)) >= threshold:
+                item["kind"] = "room"
+                item["speed"] = float(speeds["room"])
+        out.append(item)
+    return coalesce_adjacent(out)
+
+
 def promote_flat_rooms(
     segs: list[dict],
     rows: list[dict],
@@ -769,6 +803,9 @@ def apply_room_hold_ramp(
     # Active camera motion: not a static hold → keep 1x
     static_hold_motion_max = float(pacing.get("static_hold_motion_max", 7.0))
     room_speed = float(cfg["speeds"]["room"])
+    # Ramp entries describe relative growth from their first configured speed.
+    # Changing speeds.room must also change the initial room playback speed.
+    ramp_base = steps[0]["speed"]
 
     out: list[dict] = []
     for seg in segs:
@@ -797,10 +834,10 @@ def apply_room_hold_ramp(
                 continue
             # dwell time at midpoint of this sub-range (relative to room start)
             rel = ((a + b) / 2.0) - t0
-            speed = steps[0]["speed"]
+            speed = room_speed
             for step in steps:
                 if rel + 1e-9 >= step["after"]:
-                    speed = step["speed"]
+                    speed = room_speed * step["speed"] / ramp_base
                 else:
                     break
             if rows is not None:
@@ -813,7 +850,7 @@ def apply_room_hold_ramp(
                 elif (
                     scenic_skip
                     and avg_e >= scenic_skip_edge
-                    and avg_m > float(pacing.get("static_motion_max", 4.5))
+                    and avg_m > float(pacing.get("static_motion_max", 1.5))
                 ):
                     speed = room_speed
                 # else: static / near-static hold — apply dwell ramp even with furniture
@@ -845,12 +882,12 @@ def apply_static_hold_boost(
     if not segs or not rows:
         return segs
     pacing = cfg.get("pacing") or {}
-    if not bool(pacing.get("static_boost_enabled", True)):
+    if not pacing.get("enabled", True) or not bool(pacing.get("static_boost_enabled", True)):
         return segs
 
-    thr = float(pacing.get("static_motion_max", 4.5))
-    min_sec = float(pacing.get("static_min_sec", 0.7))
-    boost = float(pacing.get("static_boost_speed", 2.6))
+    thr = float(pacing.get("static_motion_max", 1.5))
+    min_sec = float(pacing.get("static_min_sec", 2.5))
+    boost = float(pacing.get("static_boost_speed", 1.12))
     absorb = float(pacing.get("static_absorb_sec", 0.35))
     k = int(cfg.get("analysis", {}).get("smooth_window", 7))
 
@@ -1024,7 +1061,7 @@ def apply_overrides(
 
 def validate_timeline(segs: list[dict], duration: float, eps: float = 1e-6) -> None:
     """Ensure segments cover the input exactly once with positive playback speed."""
-    if duration <= 0:
+    if not np.isfinite(duration) or duration <= 0:
         raise ValueError("duration must be > 0")
     if not segs:
         raise ValueError("segment timeline is empty")
@@ -1034,6 +1071,8 @@ def validate_timeline(segs: list[dict], duration: float, eps: float = 1e-6) -> N
     for i, seg in enumerate(segs):
         t0, t1 = float(seg["t0"]), float(seg["t1"])
         speed = float(seg["speed"])
+        if not np.isfinite(t0) or not np.isfinite(t1):
+            raise ValueError(f"segment {i} has invalid timestamps")
         if abs(t0 - previous) > eps:
             raise ValueError(f"segment {i} has a gap or overlap at {t0:.6f}s")
         if t1 <= t0:
@@ -1120,6 +1159,9 @@ def build_segments(
     # After promote: long high-structure "fast" → move (corridor walking ≠ blank wall)
     # Must run *after* promote_corridor so it cannot re-upgrade walking to 3x.
     segs = demote_long_structured_fast(segs, rows, cfg)
+    # Motion blur can depress edge density during a deliberate content pan.
+    # The richer entropy/sharpness score provides a second, conservative guard.
+    segs = demote_informative_fast(segs, rows, cfg)
     # Second sandwich pass: catch living→bath→living digressions reintroduced
     # or slightly longer than the first pass threshold.
     segs = demote_sandwich_fast(segs, rows, **sandwich_kw)
@@ -1149,5 +1191,10 @@ def build_segments(
     segs = coalesce_adjacent(segs)
     # Near-static camera holds → extra speed (idle frames)
     segs = apply_static_hold_boost(segs, rows, cfg)
+    segs = coalesce_adjacent(segs)
+    # A legacy sidecar or a combined room ramp must not bypass natural pacing.
+    max_speed = float(cfg.get("max_speed", 1.30))
+    for segment in segs:
+        segment["speed"] = min(float(segment["speed"]), max_speed)
     segs = coalesce_adjacent(segs)
     return normalize_timeline(segs, duration)

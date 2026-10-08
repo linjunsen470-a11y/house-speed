@@ -2,7 +2,7 @@
 
 ## Project intent
 
-This is a personal real-estate walkthrough video editor, primarily maintained
+This is a speed-only real-estate walkthrough video editor, primarily maintained
 through IDE AI agents. Keep it easy to inspect, run, tune, and repair locally.
 Prefer a small explicit change over a new framework or abstraction layer.
 
@@ -10,10 +10,15 @@ Core product constraints:
 
 - Never discard source intervals. Editing is implemented with trim, speed
   changes, and concat; the complete source timeline must remain covered.
+- Default pacing targets natural camera movement for later TTS voiceover:
+  room 1.0x, move 1.18x, fast 1.30x, and modest hold boosts up to 1.25x.
+  Keep short pauses; do not restore aggressive speed-up defaults.
+  Final segment speeds must respect max_speed (default 1.30), even when
+  older sidecars contain higher speed values. Preserve this guard when changing pacing.
 - Protect informative rooms, gardens, and deliberate pans from excessive
   acceleration. A false `room -> fast` decision is more costly than a slightly
   longer output.
-- Keep processing local with Python, OpenCV, NumPy, Pillow, PyYAML, ffmpeg, and
+- Keep processing local with Python, OpenCV, NumPy, PyYAML, ffmpeg, and
   ffprobe. Do not add cloud services or model APIs without an explicit request.
 - `algorithm.mode: legacy` is the production default. `candidate` is for
   offline A/B evaluation until independent videos pass the documented gates.
@@ -26,15 +31,9 @@ Core product constraints:
 - `walkthrough_edit/analyze.py`: per-frame CV features and cache row schema.
 - `walkthrough_edit/classify.py`: frame classification, segment
   post-processing, overrides, and pacing.
-- `walkthrough_edit/render.py`: ffprobe helpers and atomic Stage-A ffmpeg
+- `walkthrough_edit/render.py`: ffprobe helpers and atomic ffmpeg
   rendering.
-- `walkthrough_edit/pack.py`: titles, stickers, BGM, optional voiceover/captions,
-  and atomic Stage-B output.
-- `walkthrough_edit/script.py` / `place.py` / `timeline_map.py`: voice lines,
-  role placement on the output timeline, segments→output bands.
-- `walkthrough_edit/tts.py` / `captions.py`: local-first TTS cache and fixed-
-  anchor ASS captions (display text cleaned separately from speech).
-- `walkthrough_edit/pipeline.py`: configuration layers, cache/provenance, and
+- `walkthrough_edit/pipeline.py`: configuration layers, analysis caches, reports, and
   end-to-end orchestration.
 - `config.yaml`: checked-in defaults intended for normal personal use.
 - `evaluate_segments.py`: single-plan and dataset evaluation.
@@ -42,6 +41,7 @@ Core product constraints:
   validation.
 - `tests/`: fast unit tests plus small ffmpeg integration tests.
 - `examples/`: safe checked-in configuration and labeling examples.
+- `AUDIT.md`: audit findings, validation evidence, and known limitations.
 - `legacy/`: local folder for archiving completed project video and image files (untracked).
 
 ## Setup and routine commands
@@ -87,6 +87,9 @@ Configuration:
 - Preserve deep-merge behavior for per-video `<stem>.edit.yaml` sidecars.
 - Unknown YAML keys should remain visible as warnings; do not silently accept
   likely typos.
+- Explicit CLI config paths must exist; do not silently fall back on a typo.
+- pacing.enabled=false disables both room hold and static boosts. Hold ramp
+  entries are relative to their first speed and scale with speeds.room.
 - Use sidecar overrides for one video instead of hard-coding filenames or
   timestamps in core modules.
 
@@ -107,7 +110,9 @@ Timeline and rendering:
 - Account for videos without audio, Windows file locking, Unicode paths, and
   filenames beginning with `-`.
 - Never replace the original input path.
+- A review path must differ from both input and final output paths.
 - Validate an ffmpeg output before atomically replacing an existing result.
+  Confirm its video stream, dimensions, audio presence, and expected duration.
 
 Algorithm work:
 
@@ -126,14 +131,13 @@ Algorithm work:
 The following are local/regenerable and must not be committed:
 
 - source and rendered videos;
-- `frames/`, `edited_1/`, `eval/`, `legacy/`, and `stickers_workspace/`;
-- ffmpeg logs, `.part` files, Python caches, IDE state, downloaded BGM, and
-  generated sticker caches;
+- `frames/`, `eval/`, and `legacy/`;
+- ffmpeg logs, `.part` files, Python caches, and IDE state;
 - `config.local.yaml`, `<stem>.edit.yaml`, private labels, and `scripts/_*.py`
   one-off scratch scripts.
 
-Small curated fonts, style boards, sticker previews, Markdown documentation,
-and files under `examples/` are intentionally allowed by `.gitignore`.
+Markdown documentation and files under `examples/` may be tracked.
+Do not add titles, stickers, music, voiceover, subtitles, or packaging features.
 
 ## Definition of done
 

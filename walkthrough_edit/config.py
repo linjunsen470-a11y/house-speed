@@ -12,6 +12,8 @@ import yaml
 
 # Built-in defaults (used when a key is missing from YAML)
 DEFAULTS: dict[str, Any] = {
+    # Applies after every speed assignment, including old per-video sidecars.
+    "max_speed": 1.30,
     "algorithm": {
         # Candidate mode is deliberately opt-in until held-out videos pass.
         "mode": "legacy",
@@ -63,9 +65,9 @@ DEFAULTS: dict[str, Any] = {
         "scenic_edge_min": 0.16,
     },
     "speeds": {
-        "room": 1.35,
-        "move": 2.65,
-        "fast": 3.5,
+        "room": 1.0,
+        "move": 1.18,
+        "fast": 1.30,
     },
     "segments": {
         "min_duration": 0.45,
@@ -81,6 +83,8 @@ DEFAULTS: dict[str, Any] = {
         "corridor_promote_min_sec": 1.2,
         "structured_fast_demote_min_sec": 2.0,
         "structured_fast_demote_edge_min": 0.065,
+        # Existing local CV information score; protects content-rich shots from fast.
+        "informative_fast_guard_min": 0.72,
     },
     # Scene digression A→B→A (local CV; needs analysis_features from analyze)
     "scene_aba": {
@@ -107,15 +111,15 @@ DEFAULTS: dict[str, Any] = {
         "scenic_skip_edge_min": 0.115,
         "static_hold_motion_max": 7.0,
         "static_boost_enabled": True,
-        "static_motion_max": 4.5,
-        "static_min_sec": 0.7,
-        "static_boost_speed": 2.7,
+        "static_motion_max": 1.5,
+        "static_min_sec": 2.5,
+        "static_boost_speed": 1.12,
         "static_absorb_sec": 0.35,
         "room_hold_ramp": [
-            {"after": 0.0, "speed": 1.35},
-            {"after": 2.5, "speed": 1.7},
-            {"after": 5.0, "speed": 2.2},
-            {"after": 8.0, "speed": 2.7},
+            {"after": 0.0, "speed": 1.0},
+            {"after": 4.0, "speed": 1.08},
+            {"after": 8.0, "speed": 1.16},
+            {"after": 12.0, "speed": 1.25},
         ],
     },
     "overrides": [],
@@ -138,107 +142,7 @@ DEFAULTS: dict[str, Any] = {
         # Optional absolute path to a .ttf/.ttc for drawtext (auto-detect if empty)
         "fontfile": "",
     },
-    # Stage-B packaging: short-video 花字 + 私信贴纸 + BGM only
-    "pack": {
-        "enabled": False,
-        "assets_dir": "assets",
-        "style": "douyin_estate",
-        "fontfile": "",
-        "text": {
-            "lines": [],
-            "title": "",
-            "highlights": [],
-            "price": "",
-            "line1": "",
-            "line2": "",
-            "line3": "",
-            "line4": "",
-        },
-        "layout": {
-            "y_rel": 0.255,
-            "max_width_rel": 0.88,
-            "highlights_mode": "join",  # join | stack
-            # optional: font_size_rel, line_gap_rel, sparkle (see validate)
-        },
-        "text_motion": {
-            "enter": "fade",  # none | fade | pop
-            "duration": 0.35,
-            "bounce_px": 0.0,  # off — no text jitter
-            "bounce_period": 1.4,
-            "float_px": 0.0,  # legacy alias → bounce_px
-            "float_period": 1.4,
-            "pulse": 0.0,  # off — keep text solid
-            "pulse_period": 2.0,
-            "sparkle_anim": True,  # twinkling stars APNG on price
-            "sparkle_fps": 10,
-            "sparkle_frames": 10,
-        },
-        "sticker": {
-            "enabled": True,
-            "style": "dm_estate_cta",
-            "text": "私信了解",  # 私 / 私信 / 私信我 / 私信了解
-            "schedule": "after_voice",  # fixed | after_voice | end_only
-            "start": 4.5,  # used when schedule=fixed
-            "after_voice_gap": 0.45,
-            "duration": 2.5,
-            "repeat_at_end": True,
-            "end_lead": 2.8,
-            "width_rel": 0.26,
-            "x": 0.16,
-            "y": 0.90,
-            "file": "",
-            "enter": "slide_up",  # none | pop | slide_up
-            "enter_ms": 280,
-            "fps": 12,
-        },
-        "audio": {
-            "bgm": "random",
-            "volume": 0.80,
-            "fade_in": 0.5,
-            "fade_out": 0.8,
-        },
-        # Optional Stage-B voiceover + bottom ASS captions (default off)
-        "voiceover": {
-            "enabled": False,
-            "mode": "highlights",  # highlights | script | file | chapters
-            "script": [],
-            "chapters": [],
-            "file": "",
-            "engine": "auto",  # auto | edge | silence
-            "voice": "zh-CN-XiaoxiaoNeural",
-            "rate": "+8%",
-            "volume": 1.0,
-            # Constant BGM underlay when VO is present (no dynamic ducking).
-            "bgm_under_voice": 0.40,
-            "bgm_duck": 0.40,  # legacy alias of bgm_under_voice
-            "start": 1.0,
-            "end_pad": 2.2,
-            "gap": 0.22,
-            "fit": "pack",  # pack | spread | trim（pack=紧凑，少留白）
-            "coverage": 0.55,
-            "max_gap": 0.55,  # 句间静音上限（秒）
-            "max_pref_wait": 0.9,  # 等 room 段最多再等这么久
-            "snap_cuts": True,
-            "snap_window": 0.15,
-            "include_cta": True,
-            "price_speak": "",
-            "max_lines": 5,
-        },
-        "captions": {
-            "enabled": False,
-            "layout": "bottom_center",  # bottom_center | bottom_right（略偏右避贴纸）
-            "pos_x_rel": 0.52,
-            "font_name": "Microsoft YaHei",
-            "font_size": 0,
-            "font_size_rel": 0.045,
-            "margin_v": 0,
-            "margin_v_rel": 0.09,
-            "margin_lr": 0,
-            "max_chars_one_line": 12,
-            "max_chars_two_lines": 21,
-            "stroke": True,
-        },
-    },
+
 }
 
 
@@ -322,6 +226,7 @@ def _number(value: Any, name: str, *, minimum: float | None = None) -> float:
 
 
 def _validate(cfg: dict[str, Any]) -> None:
+    cfg["max_speed"] = _number(cfg.get("max_speed", 1.30), "max_speed", minimum=1.0)
     algorithm = cfg.get("algorithm") or {}
     if not isinstance(algorithm, dict):
         raise ValueError("algorithm must be a mapping")
@@ -464,6 +369,13 @@ def _validate(cfg: dict[str, Any]) -> None:
     )
     if segs["structured_fast_demote_edge_min"] > 1:
         raise ValueError("segments.structured_fast_demote_edge_min must be <= 1")
+    segs["informative_fast_guard_min"] = _number(
+        segs.get("informative_fast_guard_min", 0.72),
+        "segments.informative_fast_guard_min",
+        minimum=0,
+    )
+    if segs["informative_fast_guard_min"] > 1:
+        raise ValueError("segments.informative_fast_guard_min must be <= 1")
     segs["sandwich_neighbor_edge_min"] = _number(
         segs.get("sandwich_neighbor_edge_min", 0.10),
         "segments.sandwich_neighbor_edge_min",
@@ -561,17 +473,17 @@ def _validate(cfg: dict[str, Any]) -> None:
         pacing.get("static_boost_enabled", True)
     )
     cfg["pacing"]["static_motion_max"] = _number(
-        pacing.get("static_motion_max", 4.5),
+        pacing.get("static_motion_max", 1.5),
         "pacing.static_motion_max",
         minimum=0,
     )
     cfg["pacing"]["static_min_sec"] = _number(
-        pacing.get("static_min_sec", 0.7),
+        pacing.get("static_min_sec", 2.5),
         "pacing.static_min_sec",
         minimum=0,
     )
     cfg["pacing"]["static_boost_speed"] = _number(
-        pacing.get("static_boost_speed", 2.7),
+        pacing.get("static_boost_speed", 1.12),
         "pacing.static_boost_speed",
         minimum=0.1,
     )
@@ -627,339 +539,3 @@ def _validate(cfg: dict[str, Any]) -> None:
     else:
         review["fontfile"] = ""
     cfg["review"] = review
-
-    pack = cfg.get("pack") or {}
-    pack["enabled"] = bool(pack.get("enabled", False))
-    pack["assets_dir"] = str(pack.get("assets_dir") or "assets")
-    pack["style"] = str(pack.get("style") or "douyin_estate")
-    pack["fontfile"] = str(pack.get("fontfile") or "").strip()
-    text = pack.get("text") or {}
-    if not isinstance(text, dict):
-        raise ValueError("pack.text must be a mapping")
-    lines_val = text.get("lines")
-    if lines_val is None:
-        lines_list: list[str] = []
-    elif isinstance(lines_val, list):
-        lines_list = [str(x) for x in lines_val]
-    else:
-        raise ValueError("pack.text.lines must be a list of strings")
-    highlights_val = text.get("highlights")
-    if highlights_val is None:
-        highlights_list: list[str] = []
-    elif isinstance(highlights_val, str):
-        highlights_list = [highlights_val]
-    elif isinstance(highlights_val, list):
-        highlights_list = [str(x) for x in highlights_val]
-    else:
-        raise ValueError("pack.text.highlights must be a string or list of strings")
-    pack["text"] = {
-        "lines": lines_list,
-        "title": str(text.get("title") or ""),
-        "highlights": highlights_list,
-        "price": str(text.get("price") or ""),
-        "line1": str(text.get("line1") or text.get("title") or ""),
-        "line2": str(text.get("line2") or text.get("subtitle") or ""),
-        "line3": str(text.get("line3") or text.get("price") or ""),
-        "line4": str(text.get("line4") or ""),
-        "line5": str(text.get("line5") or ""),
-    }
-    layout = pack.get("layout") or {}
-    if not isinstance(layout, dict):
-        raise ValueError("pack.layout must be a mapping")
-    hl_mode = str(layout.get("highlights_mode") or "join").strip().lower()
-    if hl_mode not in {"join", "stack"}:
-        raise ValueError("pack.layout.highlights_mode must be 'join' or 'stack'")
-    layout_out: dict[str, Any] = {
-        "y_rel": _number(layout.get("y_rel", 0.255), "pack.layout.y_rel", minimum=0),
-        "max_width_rel": _number(
-            layout.get("max_width_rel", 0.88), "pack.layout.max_width_rel", minimum=0.4
-        ),
-        "highlights_mode": hl_mode,
-    }
-    if layout.get("font_size_rel") is not None and str(layout.get("font_size_rel")).strip() != "":
-        layout_out["font_size_rel"] = _number(
-            layout.get("font_size_rel"), "pack.layout.font_size_rel", minimum=0.03
-        )
-        if layout_out["font_size_rel"] > 0.2:
-            raise ValueError("pack.layout.font_size_rel must be <= 0.2")
-    if layout.get("line_gap_rel") is not None and str(layout.get("line_gap_rel")).strip() != "":
-        # allow negative to tighten (pull glyph pads together)
-        layout_out["line_gap_rel"] = _number(
-            layout.get("line_gap_rel"), "pack.layout.line_gap_rel", minimum=-0.05
-        )
-        if layout_out["line_gap_rel"] > 0.08:
-            raise ValueError("pack.layout.line_gap_rel must be <= 0.08")
-    if layout.get("sparkle") is not None and str(layout.get("sparkle")).strip() != "":
-        layout_out["sparkle"] = bool(layout.get("sparkle"))
-    pack["layout"] = layout_out
-    if pack["layout"]["y_rel"] > 1:
-        raise ValueError("pack.layout.y_rel must be <= 1")
-    if pack["layout"]["max_width_rel"] > 1:
-        raise ValueError("pack.layout.max_width_rel must be <= 1")
-
-    text_motion = pack.get("text_motion") or {}
-    if not isinstance(text_motion, dict):
-        raise ValueError("pack.text_motion must be a mapping")
-    tm_enter = str(text_motion.get("enter") or "none").strip().lower()
-    if tm_enter not in {"none", "fade", "pop"}:
-        raise ValueError("pack.text_motion.enter must be none|fade|pop")
-    bounce_px = text_motion.get("bounce_px")
-    if bounce_px is None:
-        bounce_px = text_motion.get("float_px", 0.0)
-    bounce_period = text_motion.get("bounce_period")
-    if bounce_period is None:
-        bounce_period = text_motion.get("float_period", 1.4)
-    pack["text_motion"] = {
-        "enter": tm_enter,
-        "duration": _number(
-            text_motion.get("duration", 0.35), "pack.text_motion.duration", minimum=0.05
-        ),
-        "bounce_px": _number(bounce_px, "pack.text_motion.bounce_px", minimum=0),
-        "bounce_period": _number(
-            bounce_period, "pack.text_motion.bounce_period", minimum=0.5
-        ),
-        "float_px": _number(bounce_px, "pack.text_motion.float_px", minimum=0),
-        "float_period": _number(
-            bounce_period, "pack.text_motion.float_period", minimum=0.5
-        ),
-        "pulse": _number(
-            text_motion.get("pulse", 0.0), "pack.text_motion.pulse", minimum=0
-        ),
-        "pulse_period": _number(
-            text_motion.get("pulse_period", 2.0),
-            "pack.text_motion.pulse_period",
-            minimum=0.8,
-        ),
-        "sparkle_anim": bool(text_motion.get("sparkle_anim", True)),
-        "sparkle_fps": int(
-            _number(text_motion.get("sparkle_fps", 10), "pack.text_motion.sparkle_fps", minimum=6)
-        ),
-        "sparkle_frames": int(
-            _number(
-                text_motion.get("sparkle_frames", 10),
-                "pack.text_motion.sparkle_frames",
-                minimum=4,
-            )
-        ),
-    }
-    if pack["text_motion"]["duration"] > 2.0:
-        raise ValueError("pack.text_motion.duration must be <= 2.0")
-    if pack["text_motion"]["bounce_px"] > 24:
-        raise ValueError("pack.text_motion.bounce_px must be <= 24")
-    if pack["text_motion"]["bounce_period"] > 8.0:
-        raise ValueError("pack.text_motion.bounce_period must be <= 8")
-    if pack["text_motion"]["pulse"] > 0.2:
-        raise ValueError("pack.text_motion.pulse must be <= 0.2")
-    if pack["text_motion"]["pulse_period"] > 8.0:
-        raise ValueError("pack.text_motion.pulse_period must be <= 8")
-    if pack["text_motion"]["sparkle_fps"] > 24:
-        raise ValueError("pack.text_motion.sparkle_fps must be <= 24")
-    if pack["text_motion"]["sparkle_frames"] > 24:
-        raise ValueError("pack.text_motion.sparkle_frames must be <= 24")
-
-    st = pack.get("sticker") or {}
-    if not isinstance(st, dict):
-        raise ValueError("pack.sticker must be a mapping")
-    cta_text = str(st.get("text") if st.get("text") is not None else "私信了解").strip()
-    if not cta_text:
-        cta_text = "私信了解"
-    if len(cta_text) > 8:
-        raise ValueError(
-            "pack.sticker.text should be short "
-            "(e.g. 私 / 私信 / 私信我 / 私信了解), max 8 chars"
-        )
-    st_enter = str(st.get("enter") or "slide_up").strip().lower()
-    if st_enter not in {"none", "pop", "slide_up"}:
-        raise ValueError("pack.sticker.enter must be none|pop|slide_up")
-    st_sched = str(st.get("schedule") or "after_voice").strip().lower()
-    if st_sched not in {"fixed", "after_voice", "after_vo", "after", "end_only", "end"}:
-        raise ValueError("pack.sticker.schedule must be fixed|after_voice|end_only")
-    pack["sticker"] = {
-        "enabled": bool(st.get("enabled", True)),
-        "style": str(st.get("style") or "dm_estate_cta"),
-        "text": cta_text,
-        "schedule": st_sched,
-        "start": _number(st.get("start", 4.5), "pack.sticker.start", minimum=0),
-        "after_voice_gap": _number(
-            st.get("after_voice_gap", 0.45), "pack.sticker.after_voice_gap", minimum=0
-        ),
-        "duration": _number(st.get("duration", 2.5), "pack.sticker.duration", minimum=0.1),
-        "repeat_at_end": bool(st.get("repeat_at_end", True)),
-        "end_lead": _number(st.get("end_lead", 2.8), "pack.sticker.end_lead", minimum=0.1),
-        "width_rel": _number(st.get("width_rel", 0.26), "pack.sticker.width_rel", minimum=0.05),
-        "x": _number(st.get("x", 0.16), "pack.sticker.x", minimum=0),
-        "y": _number(st.get("y", 0.90), "pack.sticker.y", minimum=0),
-        "file": str(st.get("file") or "").strip(),
-        "enter": st_enter,
-        "enter_ms": int(
-            _number(st.get("enter_ms", 280), "pack.sticker.enter_ms", minimum=80)
-        ),
-        "fps": int(_number(st.get("fps", 12), "pack.sticker.fps", minimum=6)),
-    }
-    if pack["sticker"]["enter_ms"] > 1500:
-        raise ValueError("pack.sticker.enter_ms must be <= 1500")
-    if pack["sticker"]["fps"] > 30:
-        raise ValueError("pack.sticker.fps must be <= 30")
-    if pack["sticker"]["width_rel"] > 0.6:
-        raise ValueError("pack.sticker.width_rel must be <= 0.6")
-    if pack["sticker"]["x"] > 1 or pack["sticker"]["y"] > 1:
-        raise ValueError("pack.sticker.x/y must be in 0..1")
-    audio = pack.get("audio") or {}
-    if not isinstance(audio, dict):
-        raise ValueError("pack.audio must be a mapping")
-    pack["audio"] = {
-        "bgm": str(audio.get("bgm") or "random").strip() or "random",
-        "volume": _number(audio.get("volume", 0.80), "pack.audio.volume", minimum=0),
-        "fade_in": _number(audio.get("fade_in", 0.5), "pack.audio.fade_in", minimum=0),
-        "fade_out": _number(audio.get("fade_out", 0.8), "pack.audio.fade_out", minimum=0),
-    }
-    if pack["audio"]["volume"] > 2:
-        raise ValueError("pack.audio.volume must be <= 2")
-
-    vo = pack.get("voiceover") or {}
-    if not isinstance(vo, dict):
-        raise ValueError("pack.voiceover must be a mapping")
-    vo_mode = str(vo.get("mode") or "highlights").strip().lower()
-    if vo_mode not in {"highlights", "script", "lines", "file", "chapters"}:
-        raise ValueError("pack.voiceover.mode must be highlights|script|file|chapters")
-    vo_engine = str(vo.get("engine") or "auto").strip().lower()
-    if vo_engine not in {"auto", "edge", "edge-tts", "edge_tts", "silence", "silent", "none", "mute"}:
-        raise ValueError("pack.voiceover.engine must be auto|edge|silence")
-    vo_fit = str(vo.get("fit") or "pack").strip().lower()
-    if vo_fit not in {"pad", "pack", "spread", "trim"}:
-        raise ValueError("pack.voiceover.fit must be pack|spread|trim")
-    script_val = vo.get("script")
-    if script_val is None:
-        script_list: list[str] = []
-    elif isinstance(script_val, str):
-        script_list = [script_val]
-    elif isinstance(script_val, list):
-        script_list = [str(x) for x in script_val]
-    else:
-        raise ValueError("pack.voiceover.script must be a string or list of strings")
-    chapters_val = vo.get("chapters")
-    if chapters_val is None:
-        chapters_list: list[Any] = []
-    elif isinstance(chapters_val, list):
-        chapters_list = list(chapters_val)
-    else:
-        raise ValueError("pack.voiceover.chapters must be a list")
-    # Prefer bgm_under_voice; accept legacy bgm_duck as the same constant underlay.
-    if vo.get("bgm_under_voice") is not None:
-        bgm_under = _number(
-            vo.get("bgm_under_voice"), "pack.voiceover.bgm_under_voice", minimum=0
-        )
-    else:
-        bgm_under = _number(vo.get("bgm_duck", 0.40), "pack.voiceover.bgm_duck", minimum=0)
-    pack["voiceover"] = {
-        "enabled": bool(vo.get("enabled", False)),
-        "mode": vo_mode,
-        "script": script_list,
-        "chapters": chapters_list,
-        "file": str(vo.get("file") or "").strip(),
-        "engine": vo_engine,
-        "voice": str(vo.get("voice") or "zh-CN-XiaoxiaoNeural").strip()
-        or "zh-CN-XiaoxiaoNeural",
-        "rate": str(vo.get("rate") or "+8%").strip() or "+8%",
-        "volume": _number(vo.get("volume", 1.0), "pack.voiceover.volume", minimum=0),
-        "bgm_under_voice": bgm_under,
-        "bgm_duck": bgm_under,  # alias
-        "start": _number(vo.get("start", 1.0), "pack.voiceover.start", minimum=0),
-        "end_pad": _number(vo.get("end_pad", 2.2), "pack.voiceover.end_pad", minimum=0),
-        "gap": _number(vo.get("gap", 0.22), "pack.voiceover.gap", minimum=0),
-        "fit": vo_fit,
-        "coverage": _number(vo.get("coverage", 0.55), "pack.voiceover.coverage", minimum=0.3),
-        "max_gap": _number(vo.get("max_gap", 0.55), "pack.voiceover.max_gap", minimum=0.15),
-        "max_pref_wait": _number(
-            vo.get("max_pref_wait", 0.9), "pack.voiceover.max_pref_wait", minimum=0
-        ),
-        "snap_cuts": bool(vo.get("snap_cuts", True)),
-        "snap_window": _number(
-            vo.get("snap_window", 0.15), "pack.voiceover.snap_window", minimum=0
-        ),
-        "include_cta": bool(vo.get("include_cta", True)),
-        "price_speak": str(vo.get("price_speak") or "").strip(),
-        "max_lines": int(
-            _number(vo.get("max_lines", 5), "pack.voiceover.max_lines", minimum=1)
-        ),
-    }
-    if pack["voiceover"]["volume"] > 2:
-        raise ValueError("pack.voiceover.volume must be <= 2")
-    if pack["voiceover"]["bgm_under_voice"] > 2:
-        raise ValueError("pack.voiceover.bgm_under_voice must be <= 2")
-    if pack["voiceover"]["max_lines"] > 8:
-        raise ValueError("pack.voiceover.max_lines must be <= 8")
-    if pack["voiceover"]["start"] > 30:
-        raise ValueError("pack.voiceover.start must be <= 30")
-    if pack["voiceover"]["end_pad"] > 30:
-        raise ValueError("pack.voiceover.end_pad must be <= 30")
-    if pack["voiceover"]["gap"] > 3:
-        raise ValueError("pack.voiceover.gap must be <= 3")
-    if pack["voiceover"]["coverage"] > 0.95:
-        raise ValueError("pack.voiceover.coverage must be <= 0.95")
-    if pack["voiceover"]["max_gap"] > 2.5:
-        raise ValueError("pack.voiceover.max_gap must be <= 2.5")
-    if pack["voiceover"]["max_pref_wait"] > 3.0:
-        raise ValueError("pack.voiceover.max_pref_wait must be <= 3")
-    if pack["voiceover"]["snap_window"] > 1.0:
-        raise ValueError("pack.voiceover.snap_window must be <= 1")
-    if pack["voiceover"]["mode"] == "file" and pack["voiceover"]["enabled"]:
-        if not pack["voiceover"]["file"]:
-            raise ValueError("pack.voiceover.file is required when mode=file")
-
-    cap = pack.get("captions") or {}
-    if not isinstance(cap, dict):
-        raise ValueError("pack.captions must be a mapping")
-    cap_layout = str(cap.get("layout") or "bottom_center").strip().lower()
-    if cap_layout not in {"bottom_right", "bottom_center", "center"}:
-        raise ValueError("pack.captions.layout must be bottom_right|bottom_center|center")
-    pack["captions"] = {
-        "enabled": bool(cap.get("enabled", False)),
-        "layout": cap_layout,
-        "pos_x_rel": _number(cap.get("pos_x_rel", 0.52), "pack.captions.pos_x_rel", minimum=0.4),
-        "font_name": str(cap.get("font_name") or "Microsoft YaHei").strip()
-        or "Microsoft YaHei",
-        "font_size": int(
-            _number(cap.get("font_size", 0), "pack.captions.font_size", minimum=0)
-        ),
-        "font_size_rel": _number(
-            cap.get("font_size_rel", 0.045), "pack.captions.font_size_rel", minimum=0.02
-        ),
-        "margin_v": int(
-            _number(cap.get("margin_v", 0), "pack.captions.margin_v", minimum=0)
-        ),
-        "margin_v_rel": _number(
-            cap.get("margin_v_rel", 0.09), "pack.captions.margin_v_rel", minimum=0.03
-        ),
-        "margin_lr": int(
-            _number(cap.get("margin_lr", 0), "pack.captions.margin_lr", minimum=0)
-        ),
-        "max_chars_one_line": int(
-            _number(
-                cap.get("max_chars_one_line", 12),
-                "pack.captions.max_chars_one_line",
-                minimum=6,
-            )
-        ),
-        "max_chars_two_lines": int(
-            _number(
-                cap.get("max_chars_two_lines", 21),
-                "pack.captions.max_chars_two_lines",
-                minimum=10,
-            )
-        ),
-        "stroke": bool(cap.get("stroke", True)),
-    }
-    if pack["captions"]["pos_x_rel"] > 0.8:
-        raise ValueError("pack.captions.pos_x_rel must be <= 0.8")
-    if pack["captions"]["font_size_rel"] > 0.12:
-        raise ValueError("pack.captions.font_size_rel must be <= 0.12")
-    if pack["captions"]["margin_v_rel"] > 0.2:
-        raise ValueError("pack.captions.margin_v_rel must be <= 0.2")
-    if pack["captions"]["max_chars_one_line"] > 20:
-        raise ValueError("pack.captions.max_chars_one_line must be <= 20")
-    if pack["captions"]["max_chars_two_lines"] > 40:
-        raise ValueError("pack.captions.max_chars_two_lines must be <= 40")
-    if pack["captions"]["max_chars_two_lines"] < pack["captions"]["max_chars_one_line"]:
-        raise ValueError("pack.captions.max_chars_two_lines must be >= max_chars_one_line")
-    cfg["pack"] = pack

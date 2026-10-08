@@ -172,6 +172,8 @@ def resolve_review_font(configured: str | None = None) -> str | None:
 
 def atempo_chain(speed: float) -> str:
     """Build atempo chain (each factor in [0.5, 2.0])."""
+    if not math.isfinite(speed) or speed <= 0:
+        raise ValueError("Audio speed must be finite and > 0")
     if abs(speed - 1.0) < 1e-6:
         return "anull"
     factors: list[float] = []
@@ -480,6 +482,20 @@ def _without_audio_args(args: list[str]) -> list[str]:
     return cleaned
 
 
+def _validate_rendered_media(path: Path, has_audio: bool, expected_duration: float, fps: float | None) -> float:
+    """Reject malformed/truncated output before replacing an existing result."""
+    media = probe_media(path)
+    duration = float(media["duration"])
+    if not math.isfinite(duration) or duration <= 0 or not media["video_codec"] or media["width"] <= 0 or media["height"] <= 0:
+        raise RuntimeError("FFmpeg produced an unreadable or empty video")
+    if bool(media["has_audio"]) != has_audio:
+        raise RuntimeError("FFmpeg output audio stream does not match the source")
+    tolerance = max(0.25, 2.0 / (fps or 30.0))
+    if abs(duration - expected_duration) > tolerance:
+        raise RuntimeError(f"Output duration {duration:.3f}s differs from expected {expected_duration:.3f}s")
+    return duration
+
+
 def _run_ffmpeg_atomic(
     input_path: Path,
     output_path: Path,
@@ -489,6 +505,7 @@ def _run_ffmpeg_atomic(
     movflags: str,
     log_path: Path,
     expected_duration: float,
+    output_fps: float | None = None,
 ) -> float:
     """Render to a temporary sibling, validate it, then atomically replace output."""
     if input_path.resolve() == output_path.resolve():
@@ -511,6 +528,10 @@ def _run_ffmpeg_atomic(
     if has_audio:
         cmd += ["-map", "[outa]"]
     cmd += av_args
+    if output_fps is not None:
+        if not math.isfinite(output_fps) or output_fps <= 0:
+            raise ValueError("Output fps must be finite and > 0")
+        cmd += ["-r", f"{output_fps:.8f}", "-fps_mode", "cfr"]
     # Cap slightly above the estimate so frame quantization cannot clip the tail
     # while still bounding runaway encodes. Use the same estimate as the pipeline.
     duration_cap = expected_duration
@@ -553,9 +574,7 @@ def _run_ffmpeg_atomic(
         if returncode != 0:
             tail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
             raise RuntimeError(tail or "ffmpeg failed")
-        duration = probe_duration(temporary)
-        if duration <= 0:
-            raise RuntimeError("FFmpeg produced an unreadable or empty output")
+        duration = _validate_rendered_media(temporary, has_audio, expected_duration, output_fps)
         _replace_with_retry(temporary, output_path)
         succeeded = True
         return duration
@@ -597,6 +616,7 @@ def export_video(
     return _run_ffmpeg_atomic(
         input_path, output_path, filter_script, av_args, audio,
         str(enc.get("movflags", "+faststart")), log_path, expected,
+        output_fps=fps,
     )
 
 
@@ -631,9 +651,9 @@ def export_review(
         "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "64k",
     ]
-    # Prefer source fps for duration estimate; fall back to review fps grid.
-    expected = estimate_output_duration(segs, fps if fps and fps > 0 else float(review_fps))
+    expected = estimate_output_duration(segs, float(review_fps))
     return _run_ffmpeg_atomic(
         input_path, output_path, filter_script, av_args, audio,
         "+faststart", work_dir / "review_ffmpeg.log", expected,
+        output_fps=float(review_fps),
     )

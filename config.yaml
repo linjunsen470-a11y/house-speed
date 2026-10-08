@@ -1,8 +1,12 @@
 # =============================================================================
+
+# 最终速度上限：对基础倍率、停留提速、静止提速和旧侧车配置统一生效。
+# 调低可更保守；只有明确需要更快时才提高。不会为配音时长自动突破此上限。
+max_speed: 1.30
 # 房产带看视频 · 自动变速剪辑配置
 # 原则：不删除任何片段；转角/空墙/过渡加速；本地 CV（无云端 LLM）
 # 默认速度（Agent 调参请先读这里）：
-#   room 1.35× | move 2.65× | fast 3.5×（产品侧 fast 建议 ≥ 3.0）
+#   room 1.00× | move 1.18× | fast 1.30×（自然带看，便于后续 TTS 配音）
 #   room 段还可经 hold ramp / 近静止 boost 再提速（不是全程 1×）
 # 用法：python edit_speed.py 2.mp4
 #       python edit_speed.py 2.mp4 -c config.yaml -o out.mp4
@@ -48,7 +52,7 @@ analysis:
 # 双门控：
 #   高结构（客厅/卧室/外景）→ 禁止 fast，保护扫景不甩镜
 #   中结构 + 持续行走 → move/fast，过道不再拖成 1×
-#   低结构急动 / 空墙 → fast ≥ 3.0×
+#   低结构急动 / 空墙 → fast（仅轻度加速）
 # 优先级大致为：
 #   纯空墙 wall → fast
 #   edge ≥ content_struct_min → room（有内容保护）
@@ -72,10 +76,10 @@ classify:
   transitional_motion: 9.0
   transitional_edge_max: 0.090
 
-  # 有内容保护：室内家具/外景扫景 edge 达到此值 → 永不 3×
+  # 有内容保护：室内家具/外景扫景 edge 达到此值 → 不使用 fast 倍率
   content_struct_min: 0.115
   # 仅当结构低于此值时，高 motion 才判 dash→fast
-  # 0.048：略收紧，减轻客厅高运镜扫视误进 3×（勿过狠到 0.040）
+  # 0.048：略收紧，减轻客厅高运镜扫视误判为 fast（勿过狠到 0.040）
   dash_struct_max: 0.048
 
   # 过道带：中等结构 + 持续中等以上运动
@@ -85,7 +89,7 @@ classify:
   corridor_struct_hi: 0.110
   corridor_sustain_sec: 0.8
   corridor_sustain_ratio: 0.65
-  corridor_fast_motion: 14.5   # 过道内再升 fast；抬高以免正常 walking 被 3×
+  corridor_fast_motion: 14.5   # 过道内再升 fast；抬高以免正常 walking 被判为 fast
   move_struct_max: 0.090
 
   # 兼容旧字段（外景保护；主保护阈值已是 content_struct_min）
@@ -93,35 +97,37 @@ classify:
 
 # --- 各类速度倍率（>1 为加速；1 为原速）---------------------------------------
 # 注意：不会丢弃任何时间段，只改变播放速度
-# 再提速一档：目标成片更接近 90～100s
+# 以自然运镜和口播留白为优先，不为固定成片时长强行提速
 speeds:
-  room: 1.35   # 有意义实景
-  move: 2.65   # 走廊过渡
-  fast: 3.5    # 转角 / 空墙 / 急转
+  room: 1.0   # 有意义实景
+  move: 1.18   # 走廊过渡
+  fast: 1.30    # 转角 / 空墙 / 急转
 
 # --- 分段后处理 ---------------------------------------------------------------
 segments:
   # 短于该秒数的「孤岛」并入相邻段，减少闪切
   min_duration: 0.45
-  # 非空墙的短 fast 并入邻段（抑制 1×↔3× 闪切）
+  # 非空墙的短 fast 并入邻段（抑制 速度来回变化 闪切）
   min_fast_duration: 1.2
   # room—离题 fast/短 move—room 且两侧有结构 → 压成 room
-  # （客厅→洗手间→客厅 1×→3×→1× 甩镜；阈值略松以覆盖 ~3s 中段）
+  # （客厅→洗手间→客厅 实景→加速→实景 甩镜；阈值略松以覆盖 ~3s 中段）
   sandwich_demote_fast_max: 4.0
   sandwich_demote_need_high_struct: true
   sandwich_neighbor_edge_min: 0.10
   # 长中结构 room + 持续行走 → 提升为 move/fast（过道漏判）
   corridor_promote_min_sec: 1.2
-  # 长 fast 且段均 edge 仍高 → 降为 move（过道误 3×，如 2a 18–27s）
+  # 长 fast 且段均 edge 仍高 → 降为 move（过道误判 fast，如 2a 18–27s）
   structured_fast_demote_min_sec: 2.0
   structured_fast_demote_edge_min: 0.065
+  # 本地信息分数高的画面即使运动模糊，也不允许误升 fast（0~1）
+  informative_fast_guard_min: 0.72
   # 夹心否决细节（原硬编码，供 Agent 调参）
   sandwich_move_dur_factor: 0.75       # short move 也算夹心：dur <= max * factor
   sandwich_keep_wall_edge_max: 0.04   # 中段 edge 更低且够长 → 保留 fast（真空墙）
   sandwich_keep_wall_min_sec: 1.5
 
 # --- 场景离题 A→B→A（本地外观指纹 + 相位相关光流，无 LLM）----------------------
-# 检出「两端像同一处、中间像别处」的扫视中段 → 压回 room，避免 3× 甩镜
+# 检出「两端像同一处、中间像别处」的扫视中段 → 压回 room，避免加速甩镜
 # 纯低 edge 墙面不会被压（keep_wall_edge_max）
 # 关掉：scene_aba.enabled: false
 scene_aba:
@@ -132,7 +138,8 @@ scene_aba:
 
 # --- 方案 A：实景停留衰减（room hold ramp）-------------------------------------
 # 连续 room 段内按「已停留时长」分段提速，压缩同一空间过久停留，仍不删帧。
-# after = 相对该 room 段起点的秒数；speed = 该区间播放倍率。
+# after = 相对 room 段起点的秒数；speed 相对表中首档按比例增长。
+# 实际倍率 = speeds.room * 本档 speed / 首档 speed，再受 max_speed 限制。
 # 高结构 / 相机仍在动的片段跳过衰减，避免扫景后半段被抬速甩镜。
 pacing:
   enabled: true
@@ -142,23 +149,25 @@ pacing:
   static_hold_motion_max: 7.0
   # 近静止识别：motion 低于此值持续一段时间 → 强制提速
   static_boost_enabled: true
-  static_motion_max: 4.5
-  static_min_sec: 0.7
-  static_boost_speed: 2.7
+  static_motion_max: 1.5
+  # 连续近静止至少 2.5 秒才轻度提速，保留短暂停顿
+  static_min_sec: 2.5
+  static_boost_speed: 1.12
   static_absorb_sec: 0.35
   room_hold_ramp:
     - after: 0.0
-      speed: 1.35
-    - after: 2.5
-      speed: 1.7
-    - after: 5.0
-      speed: 2.2
+      speed: 1.0
+    - after: 4.0
+      speed: 1.08
     - after: 8.0
-      speed: 2.7
+      speed: 1.16
+    - after: 12.0
+      speed: 1.25
 
 # --- 人工覆盖（可选）-----------------------------------------------------------
 # 在自动分段之后，按时间强制指定 kind（room|move|fast）。
-# 重叠时后写覆盖先写。适合「某几秒必须原速/必须加速」。
+# 重叠时后写覆盖先写。这里只覆盖类别，仍可能受停留/静止提速影响。
+# 要保持 room 倍率不变，可在该视频配置中设置 pacing.enabled: false。
 # overrides:
 #   - start: 10.0
 #     end: 12.5
@@ -194,86 +203,3 @@ review:
   # drawtext 字体（Windows 建议 arial.ttf / msyh.ttc）；留空则自动探测
   # fontfile: "C:/Windows/Fonts/arial.ttf"
   fontfile: ""
-
-# --- 成片包装（短视频花字 + 私信贴纸 + 仅 BGM）------------------------------
-# 用法：python edit_speed.py 素材.mp4 --pack
-# 列出样式：python edit_speed.py --list-styles
-pack:
-  enabled: false
-  assets_dir: "assets"
-  # 花字：douyin_estate（标题/卖点/价格三级）| douyin_fire | douyin_pink | …
-  style: "douyin_estate"
-  fontfile: ""
-  text:
-    title: ""
-    highlights: []
-    price: ""
-    # 兼容旧写法：lines 首行=title，末行=price，中间=highlights
-    lines: []
-  layout:
-    y_rel: 0.255         # 花字块中心上下（偏上安全区）
-    max_width_rel: 0.88
-    highlights_mode: "join"  # join=「A · B」一行 | stack=卖点分行
-    # font_size_rel / line_gap_rel / sparkle 可选
-  text_motion:
-    enter: "fade"        # none | fade | pop（默认淡入）
-    duration: 0.35
-    bounce_px: 0         # 关闭文字跳动
-    bounce_period: 1.4
-    pulse: 0             # 关闭透明度抖动
-    pulse_period: 2.0
-    sparkle_anim: true   # 价格旁星星闪烁（APNG）
-    sparkle_fps: 10
-    sparkle_frames: 10
-  sticker:
-    enabled: true
-    # 锁定默认：暖橙花字+星光。同结构换色：
-    # dm_estate_cta_gold | _sky | _mint | _violet | _snow | _heart | _fire
-    style: "dm_estate_cta"
-    text: "私信了解"         # 私 / 私信 / 私信我 / 私信了解
-    schedule: "after_voice"  # fixed | after_voice | end_only
-    start: 4.5               # schedule=fixed 时用
-    after_voice_gap: 0.45
-    duration: 2.5
-    repeat_at_end: true
-    end_lead: 2.8
-    width_rel: 0.26
-    x: 0.16
-    y: 0.90
-    file: ""
-    enter: "slide_up"
-    enter_ms: 280
-    fps: 12
-  audio:
-    bgm: "random"
-    volume: 0.80
-    fade_in: 0.5
-    fade_out: 0.8
-  voiceover:
-    enabled: false
-    mode: "highlights"   # highlights | script | file | chapters
-    engine: "auto"       # auto/silence=仅离线计时；联网口播须显式改为 edge
-    voice: "zh-CN-XiaoxiaoNeural"
-    rate: "+8%"
-    volume: 1.0
-    bgm_under_voice: 0.40   # 有口播时 BGM 恒定垫底（无动态闪避）
-    start: 1.0
-    end_pad: 2.2
-    gap: 0.22
-    fit: "pack"          # pack=紧凑 | spread=略铺开（仍受 max_gap 限制）
-    coverage: 0.55
-    max_gap: 0.55        # 句间静音上限
-    max_pref_wait: 0.9   # 等 room 段最多再等
-    snap_cuts: true
-    include_cta: true
-    max_lines: 5
-  captions:
-    enabled: false
-    layout: "bottom_center"  # 底中；要避贴纸可改 bottom_right + pos_x_rel:0.55
-    pos_x_rel: 0.52
-    font_name: "Microsoft YaHei"
-    font_size_rel: 0.045
-    margin_v_rel: 0.09
-    max_chars_one_line: 12
-    max_chars_two_lines: 21
-    stroke: true

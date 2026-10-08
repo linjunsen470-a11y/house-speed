@@ -109,7 +109,8 @@ def main() -> int:
     for stem, segments_path, labels_path in cases:
         work = segments_path.parent
         rows = _read_motion(work / "motion.csv")
-        _attach_features(rows, work / "analysis_features.npz")
+        if not _attach_features(rows, work / "analysis_features.npz"):
+            parser.error(f"Missing or corrupt analysis features: {work}; reanalyze the source before tuning")
         duration = float(_load_json(segments_path)[-1]["t1"])
         prepared[stem] = (rows, duration, _load_labels(labels_path))
 
